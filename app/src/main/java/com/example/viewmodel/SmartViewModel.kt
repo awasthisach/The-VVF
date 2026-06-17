@@ -144,6 +144,38 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeThinkingProcess = MutableStateFlow<String?>(null)
     val activeThinkingProcess: StateFlow<String?> = _activeThinkingProcess.asStateFlow()
 
+    // --- Git Merge Conflict States & Functions ---
+    private val _conflictedFiles = MutableStateFlow<List<ConflictFile>>(getInitialConflictFiles())
+    val conflictedFiles: StateFlow<List<ConflictFile>> = _conflictedFiles.asStateFlow()
+
+    private val _selectedConflictedFile = MutableStateFlow<ConflictFile?>(null)
+    val selectedConflictedFile: StateFlow<ConflictFile?> = _selectedConflictedFile.asStateFlow()
+
+    private val _isAiResolvingBlock = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val isAiResolvingBlock: StateFlow<Map<String, Boolean>> = _isAiResolvingBlock.asStateFlow()
+
+    private val _gitSyncState = MutableStateFlow(
+        com.example.data.GitSyncState(
+            status = com.example.data.GitSyncStatus.CONFLICT,
+            lastCheckedSecondsAgo = 2,
+            localAheadCount = 0,
+            remoteAheadCount = 0,
+            repositoryName = sharedPrefs.getString("github_repo_path", "google/dagger") ?: "google/dagger",
+            latestSyncActionMessage = "Active merge conflicts detected in Theme.kt, AndroidManifest.xml, build.gradle.kts"
+        )
+    )
+    val gitSyncState: StateFlow<com.example.data.GitSyncState> = _gitSyncState.asStateFlow()
+
+    // --- Repository README Generator States & Function ---
+    private val _isReadmeGenerating = MutableStateFlow(false)
+    val isReadmeGenerating: StateFlow<Boolean> = _isReadmeGenerating.asStateFlow()
+
+    private val _generatedReadme = MutableStateFlow<String?>(null)
+    val generatedReadme: StateFlow<String?> = _generatedReadme.asStateFlow()
+
+    private val _readmeThinkingProcess = MutableStateFlow<String?>(null)
+    val readmeThinkingProcess: StateFlow<String?> = _readmeThinkingProcess.asStateFlow()
+
     init {
         viewModelScope.launch {
             // Check & initialize base mock data if DB is empty
@@ -151,6 +183,31 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
             checkSafeFolderPinState()
             // Fetch initial GitHub Repo data
             fetchGitHubData()
+            
+            // Start real-time sync observer heartbeat
+            startGitSyncHeartbeat()
+        }
+
+        // Monitor merge conflict state in real-time to update Sync Status
+        viewModelScope.launch {
+            _conflictedFiles.collect { files ->
+                val hasConflicts = files.any { !it.isFullyResolved }
+                _gitSyncState.value = _gitSyncState.value.let { state ->
+                    if (hasConflicts) {
+                        state.copy(
+                            status = com.example.data.GitSyncStatus.CONFLICT,
+                            latestSyncActionMessage = "Conflicts active in ${files.count { !it.isFullyResolved }} files. Manual resolution required."
+                        )
+                    } else if (state.status == com.example.data.GitSyncStatus.CONFLICT) {
+                        state.copy(
+                            status = com.example.data.GitSyncStatus.SYNCED,
+                            latestSyncActionMessage = "All code changes integrated cleanly! Worktree synced."
+                        )
+                    } else {
+                        state
+                    }
+                }
+            }
         }
     }
 
@@ -616,6 +673,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
         _githubRepoPath.value = path
         sharedPrefs.edit().putString("github_repo_path", path).apply()
         fetchGitHubData(path)
+        _gitSyncState.value = _gitSyncState.value.copy(repositoryName = path)
     }
 
     fun fetchGitHubData(repoPath: String = _githubRepoPath.value) {
@@ -724,5 +782,320 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             "Unknown Date"
         }
+    }
+
+    fun selectConflictedFile(fileId: String?) {
+        _selectedConflictedFile.value = _conflictedFiles.value.find { it.id == fileId }
+    }
+
+    fun resolveConflictBlock(fileId: String, blockId: String, choice: String, customCode: String? = null) {
+        _conflictedFiles.value = _conflictedFiles.value.map { file ->
+            if (file.id == fileId) {
+                val updatedBlocks = file.blocks.map { block ->
+                    if (block.id == blockId) {
+                        val resolved = when (choice) {
+                            "ours" -> block.currentCode
+                            "theirs" -> block.incomingCode
+                            "both" -> block.currentCode + "\n" + block.incomingCode
+                            "ai" -> customCode ?: block.currentCode
+                            else -> block.currentCode
+                        }
+                        block.copy(resolutionChoice = choice, resolvedCode = resolved)
+                    } else block
+                }
+                val isFullyRes = updatedBlocks.all { it.resolutionChoice != null }
+                file.copy(blocks = updatedBlocks, isFullyResolved = isFullyRes)
+            } else file
+        }
+        // Update selection reference
+        _selectedConflictedFile.value = _conflictedFiles.value.find { it.id == fileId }
+    }
+
+    fun resolveConflictBlockAI(fileId: String, blockId: String) {
+        val file = _conflictedFiles.value.find { it.id == fileId } ?: return
+        val block = file.blocks.find { block -> block.id == blockId } ?: return
+
+        viewModelScope.launch {
+            _isAiResolvingBlock.value = _isAiResolvingBlock.value + (blockId to true)
+            
+            val key = getActiveApiKey()
+            if (key.isBlank()) {
+                // Heuristic offline smart engine fallback
+                delay(1200) // simulated calculation delay
+                val resolvedText = when {
+                    block.currentCode.contains("darkColorScheme") -> {
+                        // Blend modernSkywalker Cyan with classic
+                        "val DarkColorScheme = darkColorScheme(\n" +
+                        "    primary = Color(0xFF0EA5E9), // Clean Skywalker Blue (AI optimal)\n" +
+                        "    secondary = Color(0xFF0284C7),\n" +
+                        "    tertiary = Color(0xFF80B3FF) // Blended harmony\n" +
+                        ")"
+                    }
+                    block.currentCode.contains("Theme.SmartFileManager") -> {
+                        "        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\"\n            android:theme=\"@style/Theme.Material3.Dynamic\"> // Dynamic Material3 theme resolved by AI"
+                    }
+                    else -> {
+                        // Intelligently use latest version format
+                        "    val composeVersion = \"1.7.0-beta02\" // System upgraded version auto-selected"
+                    }
+                }
+                resolveConflictBlock(fileId, blockId, "ai", resolvedText)
+            } else {
+                try {
+                    val prompt = """
+                        Current Code segment (HEAD):
+                        ${block.currentCode}
+
+                        Incoming Code segment (from branch):
+                        ${block.incomingCode}
+
+                        Conflict Description: ${block.description}
+
+                        Resolve these conflicting lines of code in the most clean, optimal software development manner.
+                        Do not output any explanation, notes, prose, or backtick codes.
+                        Output ONLY the final merged/resolved code fragment directly so it is syntactically ready.
+                    """.trimIndent()
+
+                    val systemInstruction = "You are a professional git merge conflict resolution compiler. Output raw functional code merge solution only."
+                    val (reply, _) = repository.callGemini(key, prompt, systemInstruction)
+                    
+                    var cleanedReply = reply.trim()
+                    if (cleanedReply.startsWith("```")) {
+                        val lines = cleanedReply.lines()
+                        if (lines.size > 2) {
+                            cleanedReply = lines.subList(1, lines.size - 1).joinToString("\n")
+                        }
+                    }
+                    resolveConflictBlock(fileId, blockId, "ai", cleanedReply.trim())
+                } catch (e: Exception) {
+                    resolveConflictBlock(fileId, blockId, "ai", block.currentCode + "\n" + block.incomingCode)
+                }
+            }
+            _isAiResolvingBlock.value = _isAiResolvingBlock.value - blockId
+        }
+    }
+
+    fun markFileAsCompleted(fileId: String) {
+        _conflictedFiles.value = _conflictedFiles.value.map { file ->
+            if (file.id == fileId) file.copy(isFullyResolved = true) else file
+        }
+        _selectedConflictedFile.value = null
+    }
+
+    fun resetConflictsDemo() {
+        _conflictedFiles.value = getInitialConflictFiles()
+        _selectedConflictedFile.value = null
+    }
+
+    private fun startGitSyncHeartbeat() {
+        viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                _gitSyncState.value = _gitSyncState.value.let { state ->
+                    state.copy(lastCheckedSecondsAgo = state.lastCheckedSecondsAgo + 1)
+                }
+                // Randomly, every 30 seconds we do a simulated quick check
+                if (_gitSyncState.value.lastCheckedSecondsAgo % 30 == 0) {
+                    val currentStatus = _gitSyncState.value.status
+                    if (currentStatus != com.example.data.GitSyncStatus.SYNCING && currentStatus != com.example.data.GitSyncStatus.CONFLICT) {
+                        // Refresh status text briefly
+                        _gitSyncState.value = _gitSyncState.value.copy(
+                            lastCheckedSecondsAgo = 0,
+                            latestSyncActionMessage = "Auto-scanned branch head. Local files match remote."
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun triggerFetchSync() {
+        viewModelScope.launch {
+            val hasConflicts = _conflictedFiles.value.any { !it.isFullyResolved }
+            _gitSyncState.value = _gitSyncState.value.copy(
+                status = com.example.data.GitSyncStatus.SYNCING,
+                latestSyncActionMessage = "Fetching remote refs & comparing hash codes..."
+            )
+            delay(1500)
+            _gitSyncState.value = _gitSyncState.value.copy(
+                status = if (hasConflicts) com.example.data.GitSyncStatus.CONFLICT else com.example.data.GitSyncStatus.SYNCED,
+                lastCheckedSecondsAgo = 0,
+                remoteAheadCount = 0,
+                localAheadCount = 0,
+                latestSyncActionMessage = if (hasConflicts) "Branch check completed. Ongoing conflict resolution required!" else "Successfully aligned with origin/main."
+            )
+        }
+    }
+
+    fun triggerSimulateBehind() {
+        val hasConflicts = _conflictedFiles.value.any { !it.isFullyResolved }
+        if (hasConflicts) return // Complete conflicts first
+        _gitSyncState.value = _gitSyncState.value.copy(
+            status = com.example.data.GitSyncStatus.OUT_OF_SYNC,
+            remoteAheadCount = 3,
+            latestSyncActionMessage = "Remote repository matches 3 new commits. Pull to merge."
+        )
+    }
+
+    fun triggerSimulateAhead() {
+        val hasConflicts = _conflictedFiles.value.any { !it.isFullyResolved }
+        if (hasConflicts) return // Complete conflicts first
+        _gitSyncState.value = _gitSyncState.value.copy(
+            status = com.example.data.GitSyncStatus.AHEAD,
+            localAheadCount = 2,
+            latestSyncActionMessage = "Workspace ready with 2 commits ahead of origin/main. Push suggested."
+        )
+    }
+
+    fun triggerGitPull() {
+        viewModelScope.launch {
+            _gitSyncState.value = _gitSyncState.value.copy(
+                status = com.example.data.GitSyncStatus.SYNCING,
+                latestSyncActionMessage = "Pulling refs/heads/main and integrating changes..."
+            )
+            delay(2000)
+            _gitSyncState.value = _gitSyncState.value.copy(
+                status = com.example.data.GitSyncStatus.SYNCED,
+                remoteAheadCount = 0,
+                lastCheckedSecondsAgo = 0,
+                latestSyncActionMessage = "Fast-forward merged 3 inbound commits cleanly."
+            )
+        }
+    }
+
+    fun triggerGitPush() {
+        viewModelScope.launch {
+            _gitSyncState.value = _gitSyncState.value.copy(
+                status = com.example.data.GitSyncStatus.SYNCING,
+                latestSyncActionMessage = "Uploading local objects and fast-forwarding origin/main..."
+            )
+            delay(2000)
+            _gitSyncState.value = _gitSyncState.value.copy(
+                status = com.example.data.GitSyncStatus.SYNCED,
+                localAheadCount = 0,
+                lastCheckedSecondsAgo = 0,
+                latestSyncActionMessage = "Successfully pushed references to origin/main. Green build!"
+            )
+        }
+    }
+
+    fun generateProjectReadme() {
+        viewModelScope.launch {
+            _isReadmeGenerating.value = true
+            _generatedReadme.value = null
+            _readmeThinkingProcess.value = "• Scanning android package workspace...\n• Analyzing package com.example\n• Traversing project metadata and database models..."
+            
+            val liveFilesCount = allLocalNonSafeFiles.value.size
+            val liveSafeFilesCount = allSafeFiles.value.size
+            val liveDuplicatesCount = duplicateFiles.value.size
+            val currentRepo = githubRepoPath.value
+            val accountsCount = connectedAccounts.value.size
+            
+            val systemInstruction = "You are a senior software architect documenting an advanced Android repository."
+            val prompt = """
+                Generate a comprehensive, professional, markdown-formatted README.md document for the current project.
+                
+                Codebase Blueprint Checklist:
+                - Manifest: AndroidManifest.xml (custom launcher and services)
+                - Local Storage: Room implementation under data/ with AppDatabase, FileDao, and ChatMessageDao.
+                - Unified Repository: AppRepository handles Room CRUD and coordinates REST communication to external Gemini endpoints.
+                - MVVM State: SmartViewModel.kt uses StateFlow properties to coordinate dual-mode (local scanning / cloud sim) and Git branch states.
+                - Composable Design: MainLayout.kt implements a Material 3 design system with custom theme tokens, analytics dashboards, and interactive chat loops.
+                - Advanced Git Simulation: Interactive branch tracking, heartbeat status checker, and dynamic visual diff resolvers.
+                
+                Live Application State Metrics:
+                - Currently Managed Files: \$liveFilesCount
+                - Safe Vault Files: \$liveSafeFilesCount
+                - Duplicate Redundant Files: \$liveDuplicatesCount
+                - Remote Sync Node: \$currentRepo
+                - Active Connected Accounts: \$accountsCount
+                
+                Please structure the README.md beautifully with:
+                1. Project Title & Mission Statement (An modern, elegant title)
+                2. Live Metrics Dashboard (Rendered as an ASCII or markdown table showing the real-time stats above)
+                3. High-Level Modular Architecture (Explaining Room DB persistence, Retrofit API layer, and MVVM reactive patterns with StateFlow)
+                4. Codebase Directory Map (A clean, visual text folder tree showing the main components like ui, data, viewmodel)
+                5. Setup & Customization Guide (Focusing on BuildConfig API key setups, Gradle requirements, and manual PIN setups)
+                
+                Use bold headers, elegant spacing, code blocks with kotlin/xml specifiers, and custom icons/emojis for visual rhythm. Keep the tone professional and informative.
+            """.trimIndent()
+            
+            try {
+                val key = getActiveApiKey()
+                val enableThinking = highThinkingEnabled.value
+                val (reply, thoughts) = repository.callGemini(
+                    apiKey = key,
+                    prompt = prompt,
+                    systemInstruction = systemInstruction,
+                    enableThinkingMode = enableThinking
+                )
+                
+                _generatedReadme.value = reply
+                _readmeThinkingProcess.value = thoughts ?: "• Successfully analyzed local source files & db states.\n• Synthesized workspace specifications into markdown."
+            } catch (e: Exception) {
+                _generatedReadme.value = "An error occurred while generating: \${e.localizedMessage}. Please verify your network connection and API key configuration."
+                _readmeThinkingProcess.value = "• Error in API communication: \${e.message}"
+            } finally {
+                _isReadmeGenerating.value = false
+            }
+        }
+    }
+
+    fun clearGeneratedReadme() {
+        _generatedReadme.value = null
+        _readmeThinkingProcess.value = null
+    }
+
+    private fun getInitialConflictFiles(): List<ConflictFile> {
+        return listOf(
+            ConflictFile(
+                id = "conf_1",
+                name = "Theme.kt",
+                path = "app/src/main/java/com/example/ui/theme/Theme.kt",
+                currentBranch = "main",
+                incomingBranch = "feature/dynamic-themes",
+                blocks = listOf(
+                    ConflictBlock(
+                        id = "block_1_1",
+                        lineStart = 15,
+                        currentCode = "val DarkColorScheme = darkColorScheme(\n    primary = Purple80,\n    secondary = PurpleGrey80,\n    tertiary = Pink80\n)",
+                        incomingCode = "val DarkColorScheme = darkColorScheme(\n    primary = Color(0xFF0EA5E9), // Skywalker Blue\n    secondary = Color(0xFF0284C7),\n    tertiary = Color(0xFF38BDF8)\n)",
+                        description = "Brand primary color palette definition vs cyber Skywalker cyan palette."
+                    )
+                )
+            ),
+            ConflictFile(
+                id = "conf_2",
+                name = "AndroidManifest.xml",
+                path = "app/src/main/AndroidManifest.xml",
+                currentBranch = "main",
+                incomingBranch = "feature/safefolder-activity",
+                blocks = listOf(
+                    ConflictBlock(
+                        id = "block_2_1",
+                        lineStart = 22,
+                        currentCode = "        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\"\n            android:theme=\"@style/Theme.SmartFileManager\">",
+                        incomingCode = "        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\"\n            android:theme=\"@style/Theme.Material3.Dynamic\">",
+                        description = "Sets system activity style manifest configuration."
+                    )
+                )
+            ),
+            ConflictFile(
+                id = "conf_3",
+                name = "build.gradle.kts",
+                path = "app/build.gradle.kts",
+                currentBranch = "main",
+                incomingBranch = "upgrade/compose-compiler",
+                blocks = listOf(
+                    ConflictBlock(
+                        id = "block_3_1",
+                        lineStart = 55,
+                        currentCode = "    val composeVersion = \"1.5.4\"",
+                        incomingCode = "    val composeVersion = \"1.7.0-beta02\"",
+                        description = "Upgrades building SDK toolchain environment compiler version."
+                    )
+                )
+            )
+        )
     }
 }

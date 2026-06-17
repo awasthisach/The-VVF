@@ -1860,316 +1860,1198 @@ fun GitHubTrackerScreen(viewModel: SmartViewModel) {
     var editingRepoPath by remember(repoPath) { mutableStateOf(repoPath) }
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(bottom = 80.dp)
-    ) {
-        // 1. Repository Selector Input Card
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Filled.Terminal, "Terminal icon", tint = MaterialTheme.colorScheme.primary)
+    // State, Backdrop scrim, and animations for Side Panel
+    var showCommitHistoryPanel by remember { mutableStateOf(false) }
+    
+    val conflictedFiles by viewModel.conflictedFiles.collectAsStateWithLifecycle()
+    var selectedFileToResolve by remember { mutableStateOf<com.example.data.ConflictFile?>(null) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(bottom = 80.dp)
+        ) {
+            // 1. Repository Selector Input Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Filled.Terminal, "Terminal icon", tint = MaterialTheme.colorScheme.primary)
+                            Text(
+                                "Select Repository Path",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = editingRepoPath,
+                                onValueChange = { editingRepoPath = it },
+                                placeholder = { Text("owner/repo e.g., google/dagger") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("github_repo_input"),
+                                shape = RoundedCornerShape(8.dp),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
+                            )
+
+                            Button(
+                                onClick = { viewModel.updateGithubRepoPath(editingRepoPath) },
+                                enabled = !isLoading,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.testTag("github_sync_btn")
+                            ) {
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                } else {
+                                    Icon(Icons.Filled.Refresh, "Sync data", modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Sync")
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (errorMsg == null) Color(0xFF22C55E) else MaterialTheme.colorScheme.error)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (errorMsg == null) "Tracking repository: $repoPath" else "Sync Issue Detected",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (errorMsg == null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
+                            )
+                        }
+
+                        errorMsg?.let {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = it,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.error,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Real-Time Repository Sync Monitor
+            item {
+                val syncState by viewModel.gitSyncState.collectAsStateWithLifecycle()
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("repo_sync_monitor_card"),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        // Title Row
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (syncState.status == com.example.data.GitSyncStatus.SYNCED) Color(0xFF22C55E)
+                                            else if (syncState.status == com.example.data.GitSyncStatus.SYNCING) Color(0xFF3B82F6)
+                                            else if (syncState.status == com.example.data.GitSyncStatus.CONFLICT) Color(0xFFEF4444)
+                                            else Color(0xFFF59E0B)
+                                        )
+                                )
+                                Text(
+                                    "Real-Time Sync Monitor",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                            
+                            // Repository Badge Capsule
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Filled.Code, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Text(
+                                        text = syncState.repositoryName,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Status Dashboard Panel
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Status Badge & Icon
+                            Column(modifier = Modifier.weight(1.1f)) {
+                                Text("Sync Status", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                Spacer(modifier = Modifier.height(4.dp))
+                                
+                                val statusText: String
+                                val statusBg: Color
+                                val statusColor: Color
+                                val statusIcon: androidx.compose.ui.graphics.vector.ImageVector
+                                
+                                when (syncState.status) {
+                                    com.example.data.GitSyncStatus.SYNCED -> {
+                                        statusText = "UP-TO-DATE"
+                                        statusBg = Color(0xFFE8F5E9)
+                                        statusColor = Color(0xFF2E7D32)
+                                        statusIcon = Icons.Filled.CheckCircle
+                                    }
+                                    com.example.data.GitSyncStatus.OUT_OF_SYNC -> {
+                                        statusText = "LOCAL BEHIND"
+                                        statusBg = Color(0xFFFFF3E0)
+                                        statusColor = Color(0xFFE65100)
+                                        statusIcon = Icons.Filled.Warning
+                                    }
+                                    com.example.data.GitSyncStatus.AHEAD -> {
+                                        statusText = "LOCAL AHEAD"
+                                        statusBg = Color(0xFFE3F2FD)
+                                        statusColor = Color(0xFF1565C0)
+                                        statusIcon = Icons.Filled.ArrowUpward
+                                    }
+                                    com.example.data.GitSyncStatus.SYNCING -> {
+                                        statusText = "SYNCING..."
+                                        statusBg = Color(0xFFECEFF1)
+                                        statusColor = Color(0xFF37474F)
+                                        statusIcon = Icons.Filled.Refresh
+                                    }
+                                    com.example.data.GitSyncStatus.CONFLICT -> {
+                                        statusText = "MERGE OVERLAPS"
+                                        statusBg = Color(0xFFFFEBEE)
+                                        statusColor = Color(0xFFC62828)
+                                        statusIcon = Icons.Filled.Warning
+                                    }
+                                }
+
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = statusBg),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = statusIcon,
+                                            contentDescription = null,
+                                            tint = statusColor,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = statusText,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = statusColor
+                                        )
+                                    }
+                                }
+                            }
+
+                            Box(modifier = Modifier.width(1.dp).height(38.dp).background(MaterialTheme.colorScheme.outlineVariant))
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            // Heartbeat Indicator Display
+                            Column(modifier = Modifier.weight(1.1f)) {
+                                Text("Last Active Scan", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Settings,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    val minutes = syncState.lastCheckedSecondsAgo / 60
+                                    val seconds = syncState.lastCheckedSecondsAgo % 60
+                                    val timeStr = if (minutes > 0) "${minutes}m ${seconds}s ago" else "${seconds}s ago"
+                                    Text(
+                                        text = "Synced $timeStr",
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Sync description feedback
                         Text(
-                            "Select Repository Path",
+                            text = syncState.latestSyncActionMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+
+                        // If behind or ahead, show special count badges
+                        if (syncState.remoteAheadCount > 0 || syncState.localAheadCount > 0) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                            ) {
+                                if (syncState.remoteAheadCount > 0) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFFFB74D).copy(alpha = 0.5f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(Icons.Filled.ArrowDownward, null, modifier = Modifier.size(12.dp), tint = Color(0xFFD84315))
+                                            Text("${syncState.remoteAheadCount} new remote commits to fetch", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD84315))
+                                        }
+                                    }
+                                }
+                                if (syncState.localAheadCount > 0) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.5f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(Icons.Filled.ArrowUpward, null, modifier = Modifier.size(12.dp), tint = Color(0xFF1565C0))
+                                            Text("${syncState.localAheadCount} local commits unpushed", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Interactive Sync Actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Primary Sync Tool Check
+                            OutlinedButton(
+                                onClick = { viewModel.triggerFetchSync() },
+                                modifier = Modifier.weight(1.1f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Check Sync", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            // Dynamic pull/push actions
+                            if (syncState.status == com.example.data.GitSyncStatus.OUT_OF_SYNC) {
+                                Button(
+                                    onClick = { viewModel.triggerGitPull() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
+                                    modifier = Modifier.weight(1.2f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Filled.ArrowDownward, null, modifier = Modifier.size(14.dp), tint = Color.White)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Pull Changes", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            } else if (syncState.status == com.example.data.GitSyncStatus.AHEAD) {
+                                Button(
+                                    onClick = { viewModel.triggerGitPush() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)),
+                                    modifier = Modifier.weight(1.2f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Filled.ArrowUpward, null, modifier = Modifier.size(14.dp), tint = Color.White)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Push Changes", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+
+                        // Simulation sandbox controls
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            text = "SIMULATION SANDBOX (Test Real-time Statuses)",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { viewModel.triggerSimulateBehind() },
+                                enabled = syncState.status != com.example.data.GitSyncStatus.CONFLICT && syncState.status != com.example.data.GitSyncStatus.SYNCING,
+                                modifier = Modifier.weight(1.1f),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f))
+                            ) {
+                                Icon(Icons.Filled.ArrowDownward, null, modifier = Modifier.size(10.dp))
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text("Set Behind", fontSize = 9.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = { viewModel.triggerSimulateAhead() },
+                                enabled = syncState.status != com.example.data.GitSyncStatus.CONFLICT && syncState.status != com.example.data.GitSyncStatus.SYNCING,
+                                modifier = Modifier.weight(1.1f),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f))
+                            ) {
+                                Icon(Icons.Filled.ArrowUpward, null, modifier = Modifier.size(10.dp))
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text("Set Ahead", fontSize = 9.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Gemini AI Project README Analyzer Card
+            item {
+                val isReadmeGenerating by viewModel.isReadmeGenerating.collectAsStateWithLifecycle()
+                val generatedReadme by viewModel.generatedReadme.collectAsStateWithLifecycle()
+                val readmeThinkingProcess by viewModel.readmeThinkingProcess.collectAsStateWithLifecycle()
+                val context = LocalContext.current
+
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("repo_readme_analyzer_card"),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        // Title row
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(
+                                    Icons.Filled.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    "Gemini README Analyst",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                            
+                            // Technology badge
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f))
+                            ) {
+                                Text(
+                                    text = "Gemini Pro/Flash",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Uses Gemini API to traverse local directory structures, analyze Room entities, live file counts, and write a professional README.md.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Live metrics summary display
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(12.dp))
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val liveFilesCount = viewModel.allLocalNonSafeFiles.collectAsStateWithLifecycle().value.size
+                            val liveSafeFilesCount = viewModel.allSafeFiles.collectAsStateWithLifecycle().value.size
+                            val liveDuplicatesCount = viewModel.duplicateFiles.collectAsStateWithLifecycle().value.size
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Local Files", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                Text("$liveFilesCount", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Safe Files", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                Text("$liveSafeFilesCount", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Duplicates", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                Text("$liveDuplicatesCount", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Remote Repo", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                val rawPath = viewModel.githubRepoPath.collectAsStateWithLifecycle().value
+                                val truncatedPath = if (rawPath.length > 12) {
+                                    rawPath.take(10) + "..."
+                                } else rawPath
+                                Text(truncatedPath, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Thinking Process Panel if generating
+                        if (isReadmeGenerating) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(12.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            "Thinking Process (High-fidelity analysis)...",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    
+                                    readmeThinkingProcess?.let { thoughts ->
+                                        Text(
+                                            text = thoughts,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                            lineHeight = 14.sp
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                        }
+
+                        // Display formatted README if exists
+                        generatedReadme?.let { readmeText ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 250.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), shape = RoundedCornerShape(12.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                val scrollState = rememberScrollState()
+                                Column(
+                                    modifier = Modifier
+                                        .verticalScroll(scrollState)
+                                        .fillMaxWidth()
+                                ) {
+                                    // Custom visual markdown formatter/renderer for the summary
+                                    readmeText.split("\n").forEach { line ->
+                                        if (line.startsWith("#")) {
+                                            val depth = line.takeWhile { it == '#' }.length
+                                            val cleanText = line.drop(depth).trim()
+                                            Text(
+                                                text = cleanText,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = if (depth == 1) 18.sp else if (depth == 2) 16.sp else 14.sp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(vertical = 4.dp)
+                                            )
+                                        } else if (line.trim().startsWith("-") || line.trim().startsWith("*")) {
+                                            val cleanText = line.trim().drop(1).trim()
+                                            Row(modifier = Modifier.padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Text("•", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                                Text(cleanText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                                            }
+                                        } else if (line.isNotBlank()) {
+                                            Text(
+                                                text = line,
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                                                lineHeight = 16.sp,
+                                                modifier = Modifier.padding(vertical = 2.dp)
+                                            )
+                                        } else {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                        }
+
+                        // Trigger actions Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (generatedReadme == null) {
+                                Button(
+                                    onClick = { viewModel.generateProjectReadme() },
+                                    enabled = !isReadmeGenerating,
+                                    modifier = Modifier.fillMaxWidth().testTag("generate_readme_btn"),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Analyze & Generate README.md")
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { viewModel.clearGeneratedReadme() },
+                                    modifier = Modifier.weight(1f).testTag("clear_readme_btn"),
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                ) {
+                                    Icon(Icons.Filled.Delete, null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Clear")
+                                }
+
+                                Button(
+                                    onClick = {
+                                        val clipboardManager = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        val clip = android.content.ClipData.newPlainText("README", generatedReadme)
+                                        clipboardManager.setPrimaryClip(clip)
+                                        Toast.makeText(context, "README copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.weight(1.2f).testTag("copy_readme_btn"),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Icon(Icons.Filled.ContentCopy, null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Copy Markdown")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Commit Frequency Bar Chart Card (Productivity visualization)
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, BorderDark)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Filled.TrendingUp, "Productivity Trend", tint = Color(0xFF0EA5E9))
+                                Text(
+                                    "Commit Activity (Last 30 Days)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                            
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                                shape = CircleShape
+                            ) {
+                                Text(
+                                    "${commits.size} Commits",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Code submission frequency over the last 30 days to measure development velocity.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        if (commits.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("No commit activity in last 30 days.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                            }
+                        } else {
+                            CommitFrequencyChart(commits = commits)
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            OutlinedButton(
+                                onClick = { showCommitHistoryPanel = true },
+                                modifier = Modifier
+                                    .align(Alignment.End)
+                                    .testTag("github_view_commit_history_trigger"),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Filled.History, contentDescription = "History Icon", modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("View All Commits", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Merge Conflict Assistant Section
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Filled.Warning, "Merge Conflict Icon", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                Column {
+                                    Text(
+                                        "Merge Conflict Assistant",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        "Resolve Git overlaps with smart AI assist",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                }
+                            }
+                            
+                            IconButton(
+                                onClick = { viewModel.resetConflictsDemo() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Refresh,
+                                    contentDescription = "Reset Conflicts Demo",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        conflictedFiles.forEach { file ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable { selectedFileToResolve = file }
+                                    .testTag("conflict_file_item_${file.id}"),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (file.isFullyResolved) 
+                                        Color(0xFFE8F5E9).copy(alpha = 0.5f) 
+                                    else 
+                                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.12f)
+                                ),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (file.isFullyResolved) Color(0xFF81C784).copy(alpha = 0.5f) else MaterialTheme.colorScheme.error.copy(alpha = 0.3f)
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(if (file.isFullyResolved) Color(0xFF22C55E) else MaterialTheme.colorScheme.error),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (file.isFullyResolved) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = file.name,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = file.path,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Card(
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (file.isFullyResolved) Color(0xFF22C55E) else MaterialTheme.colorScheme.error
+                                        ),
+                                        shape = CircleShape
+                                    ) {
+                                        Text(
+                                            text = if (file.isFullyResolved) "Resolved" else "Needs Attention",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Issues Header
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Filled.Warning, "Open issues list", tint = Color(0xFFF59E0B), modifier = Modifier.size(20.dp))
+                        Text(
+                            "Open Tasks & Issues",
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = editingRepoPath,
-                            onValueChange = { editingRepoPath = it },
-                            placeholder = { Text("owner/repo e.g., google/dagger") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("github_repo_input"),
-                            shape = RoundedCornerShape(8.dp),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
-                        )
-
-                        Button(
-                            onClick = { viewModel.updateGithubRepoPath(editingRepoPath) },
-                            enabled = !isLoading,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.testTag("github_sync_btn")
-                        ) {
-                            if (isLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            } else {
-                                Icon(Icons.Filled.Refresh, "Sync data", modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Sync")
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (errorMsg == null) Color(0xFF22C55E) else MaterialTheme.colorScheme.error)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (errorMsg == null) "Tracking repository: $repoPath" else "Sync Issue Detected",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (errorMsg == null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
-                        )
-                    }
-
-                    errorMsg?.let {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = it,
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.error,
-                            lineHeight = 14.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Commit Frequency Bar Chart Card (Productivity visualization)
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, BorderDark)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Filled.TrendingUp, "Productivity Trend", tint = Color(0xFF0EA5E9))
-                            Text(
-                                "Commit Activity (Last 30 Days)",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
-                        
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                            shape = CircleShape
-                        ) {
-                            Text(
-                                "${commits.size} Commits",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Code submission frequency over the last 30 days to measure development velocity.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    if (commits.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(150.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("No commit activity in last 30 days.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                        }
-                    } else {
-                        CommitFrequencyChart(commits = commits)
-                    }
-                }
-            }
-        }
-
-        // 3. Issues Header
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Filled.Warning, "Open issues list", tint = Color(0xFFF59E0B), modifier = Modifier.size(20.dp))
-                    Text(
-                        "Open Tasks & Issues",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium
+                        "${issues.size} Open Issues",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
-
-                Text(
-                    "${issues.size} Open Issues",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
             }
-        }
 
-        // 4. Open Issues List
-        if (issues.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Filled.CheckCircle, "Clean", tint = Color(0xFF22C55E), modifier = Modifier.size(48.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Zero open issues found! Splendid job.", fontWeight = FontWeight.SemiBold)
+            // 4. Open Issues List
+            if (issues.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Filled.CheckCircle, "Clean", tint = Color(0xFF22C55E), modifier = Modifier.size(48.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Zero open issues found! Splendid job.", fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
-            }
-        } else {
-            items(issues) { issue ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp)
-                        .clickable {
-                            try {
-                                uriHandler.openUri(issue.htmlUrl)
-                            } catch (e: Exception) {
-                                // Safe fallback if browser unavailable
+            } else {
+                items(issues) { issue ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clickable {
+                                try {
+                                    uriHandler.openUri(issue.htmlUrl)
+                                } catch (e: Exception) {
+                                    // Safe fallback if browser unavailable
+                                }
                             }
-                        }
-                        .testTag("github_issue_${issue.number}"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            .testTag("github_issue_${issue.number}"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
-                        // Avatar or icon info
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            if (issue.user?.avatarUrl != null) {
-                                val imageLoading = coil.compose.rememberAsyncImagePainter(model = issue.user.avatarUrl)
-                                Image(
-                                    painter = imageLoading,
-                                    contentDescription = "User Avatar",
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                val initials = (issue.user?.login?.take(2) ?: "GH").uppercase()
-                                Text(
-                                    initials,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-
-                        // Info details
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            // Avatar or icon info
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.15f)),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
+                                if (issue.user?.avatarUrl != null) {
+                                    val imageLoading = coil.compose.rememberAsyncImagePainter(model = issue.user.avatarUrl)
+                                    Image(
+                                        painter = imageLoading,
+                                        contentDescription = "User Avatar",
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    val initials = (issue.user?.login?.take(2) ?: "GH").uppercase()
                                     Text(
-                                        "#${issue.number}",
-                                        fontSize = 11.sp,
+                                        initials,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFEF4444),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+
+                            // Info details
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.15f)),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            "#${issue.number}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFEF4444),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+
+                                    Text(
+                                        "by @${issue.user?.login ?: "unknown"}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                                     )
                                 }
 
+                                Spacer(modifier = Modifier.height(4.dp))
+
                                 Text(
-                                    "by @${issue.user?.login ?: "unknown"}",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    text = issue.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            Text(
-                                text = issue.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        // Comments badge
-                        if (issue.comments > 0) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Icon(
-                                    Icons.Filled.Comment,
-                                    "Comments",
-                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    "${issue.comments}",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                )
+                            // Comments badge
+                            if (issue.comments > 0) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Comment,
+                                        "Comments",
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        "${issue.comments}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        // --- Side Panel overlay matching material design specifications ---
+        if (showCommitHistoryPanel) {
+            // Semi-transparent backdrop to dim the rest of the application
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { showCommitHistoryPanel = false }
+                    .testTag("github_commits_sheet_backdrop")
+            )
+
+            // Animated slide-in transition for the Side sheet
+            AnimatedVisibility(
+                visible = showCommitHistoryPanel,
+                enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+                exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(320.dp)
+                    .align(Alignment.CenterEnd)
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(320.dp)
+                        .clickable(enabled = false) { } // block propagation of click actions
+                        .testTag("github_commits_side_panel"),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = 80.dp)
+                    ) {
+                        // Header
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(SurfaceDarkHeader)
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Filled.Code, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Column {
+                                    Text(
+                                        "Commit History",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        "Last 30 Days",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { showCommitHistoryPanel = false },
+                                modifier = Modifier.testTag("github_commits_close_btn")
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close commit history side panel")
+                            }
+                        }
+
+                        // Active repository indicator sub-banner
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = "Repository: $repoPath",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Scrollable List of Commit Objects
+                        if (commits.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("No recent commits found.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(commits) { commitItem ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                // Author details
+                                                Text(
+                                                    text = commitItem.commit.author.name,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+
+                                                // Clean SHA digest tag
+                                                val shortSha = if (commitItem.sha.length > 7) commitItem.sha.take(7) else commitItem.sha
+                                                Card(
+                                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = shortSha,
+                                                        fontSize = 10.sp,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontWeight = FontWeight.Medium,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(4.dp))
+
+                                            // Action Message
+                                            Text(
+                                                text = commitItem.commit.message,
+                                                fontSize = 11.sp,
+                                                lineHeight = 15.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+
+                                            Spacer(modifier = Modifier.height(6.dp))
+
+                                            // Commit Date (formatted)
+                                            val readableDate = remember(commitItem.commit.author.date) {
+                                                commitItem.commit.author.date
+                                                    .replace("T", " ")
+                                                    .replace("Z", " UTC")
+                                            }
+                                            Text(
+                                                text = readableDate,
+                                                fontSize = 9.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Modal dialog trigger for resolution logic
+    selectedFileToResolve?.let { file ->
+        val currentFileState = conflictedFiles.find { it.id == file.id } ?: file
+        MergeConflictResolverDialog(
+            file = currentFileState,
+            viewModel = viewModel,
+            onDismiss = { selectedFileToResolve = null }
+        )
     }
 }
 
@@ -2274,6 +3156,373 @@ fun CommitFrequencyChart(commits: List<com.example.data.GitHubCommit>) {
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         maxLines = 1
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MergeConflictResolverDialog(
+    file: com.example.data.ConflictFile,
+    viewModel: SmartViewModel,
+    onDismiss: () -> Unit
+) {
+    val isAiResolvingBlock by viewModel.isAiResolvingBlock.collectAsStateWithLifecycle()
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.92f)
+                .clip(RoundedCornerShape(24.dp)),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Resolve Overlaps: ${file.name}",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Merging '${file.incomingBranch}' into '${file.currentBranch}'",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Filled.Close, contentDescription = "Close Dialog")
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // Scrollable Conflicts List
+                Box(modifier = Modifier.weight(1f)) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        items(file.blocks) { block ->
+                            val isResolvingThisBlock = isAiResolvingBlock[block.id] == true
+
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    // Block Descriptor Header
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Conflict Segment (Lines Starting at ${block.lineStart})",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+
+                                        if (block.resolutionChoice != null) {
+                                            Card(
+                                                colors = CardDefaults.cardColors(containerColor = Color(0xFF22C55E)),
+                                                shape = CircleShape
+                                            ) {
+                                                Text(
+                                                    text = "Status: Resolved",
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        } else {
+                                            Card(
+                                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                                shape = CircleShape
+                                            ) {
+                                                Text(
+                                                    text = "Unresolved",
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = block.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // Choices Panels
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        // 1. Current Branch (Ours) Box
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    viewModel.resolveConflictBlock(file.id, block.id, "ours")
+                                                }
+                                                .testTag("resolve_ours_${block.id}"),
+                                            border = BorderStroke(
+                                                width = if (block.resolutionChoice == "ours") 3.dp else 1.dp,
+                                                color = if (block.resolutionChoice == "ours") Color(0xFF22C55E) else Color(0xFF81C784).copy(alpha = 0.5f)
+                                            ),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (block.resolutionChoice == "ours") 
+                                                    Color(0xFFE8F5E9).copy(alpha = 0.8f) 
+                                                else 
+                                                    Color(0xFFE8F5E9).copy(alpha = 0.3f)
+                                            ),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        "Current Change (HEAD - ${file.currentBranch})",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFF2E7D32)
+                                                    )
+                                                    if (block.resolutionChoice == "ours") {
+                                                        Icon(Icons.Filled.Check, contentDescription = "Selected", tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = block.currentCode,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFF1B5E20),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(Color.White.copy(alpha = 0.5f))
+                                                        .padding(6.dp)
+                                                )
+                                            }
+                                        }
+
+                                        // 2. Incoming Branch (Theirs) Box
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    viewModel.resolveConflictBlock(file.id, block.id, "theirs")
+                                                }
+                                                .testTag("resolve_theirs_${block.id}"),
+                                            border = BorderStroke(
+                                                width = if (block.resolutionChoice == "theirs") 3.dp else 1.dp,
+                                                color = if (block.resolutionChoice == "theirs") Color(0xFF22C55E) else Color(0xFFFFB74D).copy(alpha = 0.5f)
+                                            ),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (block.resolutionChoice == "theirs") 
+                                                    Color(0xFFFFF3E0).copy(alpha = 0.8f) 
+                                                else 
+                                                    Color(0xFFFFF3E0).copy(alpha = 0.3f)
+                                            ),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        "Incoming Change (Branch - ${file.incomingBranch})",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFFE65100)
+                                                    )
+                                                    if (block.resolutionChoice == "theirs") {
+                                                        Icon(Icons.Filled.Check, contentDescription = "Selected", tint = Color(0xFFE65100), modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = block.incomingCode,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFFD84315),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(Color.White.copy(alpha = 0.5f))
+                                                        .padding(6.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // Manual and AI Strategies Row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { viewModel.resolveConflictBlock(file.id, block.id, "both") },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(
+                                                width = if (block.resolutionChoice == "both") 2.dp else 1.dp,
+                                                color = if (block.resolutionChoice == "both") Color(0xFF22C55E) else MaterialTheme.colorScheme.outline
+                                            ),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = if (block.resolutionChoice == "both") Color(0xFFE8F5E9).copy(alpha = 0.5f) else Color.Transparent
+                                            )
+                                        ) {
+                                            Text("Keep BOTH", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        Button(
+                                            onClick = { viewModel.resolveConflictBlockAI(file.id, block.id) },
+                                            enabled = !isResolvingThisBlock,
+                                            modifier = Modifier
+                                                .weight(1.3f)
+                                                .testTag("resolve_ai_${block.id}"),
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (block.resolutionChoice == "ai") Color(0xFF22C55E) else MaterialTheme.colorScheme.secondary
+                                            )
+                                        ) {
+                                            if (isResolvingThisBlock) {
+                                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Bolt, 
+                                                    contentDescription = "AI Resolver", 
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = Color.White
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("AI Smart Merge", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            }
+                                        }
+                                    }
+
+                                    // Result preview block
+                                    block.resolvedCode?.let { resolvedCode ->
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        Text(
+                                            "Selected Resolution Preview:",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(Color(0xFF1E1E1E), shape = RoundedCornerShape(6.dp))
+                                                .padding(10.dp)
+                                        ) {
+                                            Text(
+                                                text = resolvedCode,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF4CAF50)
+                                            )
+                                        }
+                                        
+                                        if (block.resolutionChoice == "ai") {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                "✨ Automated Gemini AI Suggestion formulated successfully.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // Footer Actions
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Cancel")
+                    }
+
+                    Button(
+                        onClick = {
+                            viewModel.markFileAsCompleted(file.id)
+                            onDismiss()
+                        },
+                        enabled = file.blocks.all { it.resolutionChoice != null },
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .testTag("submit_conflict_resolution"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF22C55E),
+                            disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                        )
+                    ) {
+                        Icon(imageVector = Icons.Filled.Done, contentDescription = "Done Icon")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Apply Resolution", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
         }
