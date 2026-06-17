@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Folder Base outline with floating depth -->
+    <path
+        android:fillColor="#3B82F6"
+        android:pathData="M24,28c-2.2,0 -4,1.8 -4,4v44c0,2.2 1.8,4 4,4h60c2.2,0 4,-1.8 4,-4v-38c0,-2.2 -1.8,-4 -4,-4H54l-4,-6H24z" />
+
+    <!-- Innermost Folder highlight/flap accent -->
+    <path
+        android:fillColor="#60A5FA"
+        android:pathData="M24,36h60v36H24z" />
+
+    <!-- Sync Cloud Overlay badge (bottom-right centered) -->
+    <path
+        android:fillColor="#F1F5F9"
+        android:strokeColor="#1E293B"
+        android:strokeWidth="1.5"
+        android:pathData="M72,52c-4.42,0 -8,3.58 -8,8c0,0.18 0.01,0.36 0.03,0.53C61.1,61.43 59,64.48 59,68c0,4.42 3.58,8 8,8h11c3.87,0 7,-3.13 7,-7c0,-3.45 -2.49,-6.31 -5.79,-6.89C79.8,55.35 76.32,52 72,52z" />
+
+    <!-- Sparkle/Glow Accent Spark -->
+    <path
+        android:fillColor="#2DD4BF"
+        android:pathData="M76,32l1,3l3,1l-3,1l-1,3l-1,-3l-3,-1l3,-1z" />
+</vector>

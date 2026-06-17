@@ -1,0 +1,265 @@
+package com.example.data
+
+import android.content.Context
+import android.util.Log
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
+import java.io.File
+
+class AppRepository(private val db: AppDatabase) {
+
+    private val fileDao = db.fileDao()
+    private val categoryDao = db.categoryDao()
+    private val secureStateDao = db.secureStateDao()
+    private val chatDao = db.chatMessageDao()
+
+    // Flow Accessors
+    val allLocalNonSafeFiles: Flow<List<FileEntity>> = fileDao.getLocalNonSafeFiles()
+    val allSafeFiles: Flow<List<FileEntity>> = fileDao.getSafeFiles()
+    val duplicateFiles: Flow<List<FileEntity>> = fileDao.getDuplicateFiles()
+    val junkFiles: Flow<List<FileEntity>> = fileDao.getJunkFiles()
+    val chatHistory: Flow<List<ChatMessageEntity>> = chatDao.getChatHistory()
+
+    fun getCloudFilesForAccount(email: String): Flow<List<FileEntity>> {
+        return fileDao.getCloudFiles(email)
+    }
+
+    // Initialize Database with satisfying initial entries if empty
+    suspend fun checkAndInitializeData() {
+        val existingFiles = fileDao.getAllFiles().firstOrNull()
+        if (existingFiles.isNullOrEmpty()) {
+            val initialFiles = listOf(
+                // Non-safe, local files
+                FileEntity(
+                    name = "IMG_20260615_1203.jpg",
+                    path = "/storage/emulated/0/DCIM/Camera/IMG_20260615_1203.jpg",
+                    size = 4200102,
+                    lastModified = 1781550000000L,
+                    mimeType = "image/jpeg",
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false
+                ),
+                FileEntity(
+                    name = "IMG_20260615_1203_DUPLICATE.jpg",
+                    path = "/storage/emulated/0/DCIM/Camera/IMG_20260615_1203_DUPLICATE.jpg",
+                    size = 4200102,
+                    lastModified = 1781550000000L,
+                    mimeType = "image/jpeg",
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = true,
+                    isJunk = false
+                ),
+                FileEntity(
+                    name = "Tax_Report_Draft_2025.xlsx",
+                    path = "/storage/emulated/0/Documents/Tax_Report_Draft_2025.xlsx",
+                    size = 1204115,
+                    lastModified = 1775820000000L,
+                    mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false
+                ),
+                FileEntity(
+                    name = "Podcast_Episode_52.mp3",
+                    path = "/storage/emulated/0/Music/Podcast_Episode_52.mp3",
+                    size = 45980111,
+                    lastModified = 1778600000000L,
+                    mimeType = "audio/mpeg",
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false
+                ),
+                FileEntity(
+                    name = "Rent_Agreement_Signed.pdf",
+                    path = "/storage/emulated/0/Download/Rent_Agreement_Signed.pdf",
+                    size = 342109,
+                    lastModified = 1780520000000L,
+                    mimeType = "application/pdf",
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false
+                ),
+                // Safe files containing sensitive items (restored or hidden)
+                FileEntity(
+                    name = "Backup_Keys_Crypt.txt",
+                    path = "/storage/emulated/0/Documents/Backup_Keys_Crypt.txt",
+                    size = 1024,
+                    lastModified = 1776820000000L,
+                    mimeType = "text/plain",
+                    isLocal = true,
+                    isSafe = true,
+                    isDuplicate = false,
+                    isJunk = false
+                ),
+                // Junk files
+                FileEntity(
+                    name = "cache_3482_temp.log",
+                    path = "/storage/emulated/0/Android/data/com.aistudio.smartfilemanager/cache/cache_3482_temp.log",
+                    size = 18911200,
+                    lastModified = System.currentTimeMillis(),
+                    mimeType = "text/plain",
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = true
+                ),
+                FileEntity(
+                    name = "Thumbs_Caches_System.db",
+                    path = "/storage/emulated/0/Android/data/com.aistudio.smartfilemanager/cache/Thumbs_Caches_System.db",
+                    size = 12410123,
+                    lastModified = System.currentTimeMillis(),
+                    mimeType = "application/octet-stream",
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = true
+                ),
+                // Cloud Files for default active account (awasthi.sach@gmail.com)
+                FileEntity(
+                    name = "Resume_Awasthi_Sach.pdf",
+                    path = "GoogleDrive://awasthi.sach@gmail.com/Documents/Resume_Awasthi_Sach.pdf",
+                    size = 1842100,
+                    lastModified = 1780990000000L,
+                    mimeType = "application/pdf",
+                    isLocal = false,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false,
+                    cloudAccountEmail = "awasthi.sach@gmail.com"
+                ),
+                FileEntity(
+                    name = "Project_Proposal_Smart_Manager.gdoc",
+                    path = "GoogleDrive://awasthi.sach@gmail.com/Work/Project_Proposal_Smart_Manager.gdoc",
+                    size = 154200,
+                    lastModified = 1781200000000L,
+                    mimeType = "application/vnd.google-apps.document",
+                    isLocal = false,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false,
+                    cloudAccountEmail = "awasthi.sach@gmail.com"
+                ),
+                FileEntity(
+                    name = "Family_Reunion_2026.png",
+                    path = "GoogleDrive://awasthi.sach@gmail.com/Photos/Family_Reunion_2026.png",
+                    size = 8410211,
+                    lastModified = 1781400000000L,
+                    mimeType = "image/png",
+                    isLocal = false,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false,
+                    cloudAccountEmail = "awasthi.sach@gmail.com"
+                ),
+                FileEntity(
+                    name = "Weekly_Sync_10_Meeting.mp4",
+                    path = "GoogleDrive://awasthi.sach@gmail.com/Videos/Weekly_Sync_10_Meeting.mp4",
+                    size = 89912400,
+                    lastModified = 1781100000000L,
+                    mimeType = "video/mp4",
+                    isLocal = false,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false,
+                    cloudAccountEmail = "awasthi.sach@gmail.com"
+                )
+            )
+
+            fileDao.insertFiles(initialFiles)
+        }
+    }
+
+    // CRUD database actions
+    suspend fun insertFile(file: FileEntity): Long = fileDao.insertFile(file)
+    suspend fun insertFiles(files: List<FileEntity>) = fileDao.insertFiles(files)
+    suspend fun updateFile(file: FileEntity) = fileDao.updateFile(file)
+    suspend fun deleteFile(file: FileEntity) = fileDao.deleteFile(file)
+    suspend fun deleteFileById(id: Long) = fileDao.deleteFileById(id)
+    suspend fun cleanAllJunk() = fileDao.clearAllJunk()
+
+    // PIN / Secure Safe State Logic
+    suspend fun getPIN(): String? {
+        return secureStateDao.getStateByKey("SAFE_PIN")?.stateValue
+    }
+
+    suspend fun setPIN(pin: String) {
+        secureStateDao.insertState(SecureStateEntity("SAFE_PIN", pin))
+    }
+
+    suspend fun getIsPinSet(): Boolean {
+        return getPIN() != null
+    }
+
+    // Chat Message DB Logic
+    suspend fun insertMessage(messageText: String, sender: String, isThinking: Boolean = false, thinkingProcess: String? = null) {
+        chatDao.insertMessage(
+            ChatMessageEntity(
+                messageText = messageText,
+                sender = sender,
+                timestamp = System.currentTimeMillis(),
+                isThinking = isThinking,
+                thinkingProcess = thinkingProcess
+            )
+        )
+    }
+
+    suspend fun clearChatHistory() {
+        chatDao.clearHistory()
+    }
+
+    // Gemini API integration service
+    suspend fun callGemini(
+        apiKey: String,
+        prompt: String,
+        systemInstruction: String? = null,
+        enableThinkingMode: Boolean = false
+    ): Pair<String, String?> {
+        // Evaluate rules:
+        // Use gemini-3.1-pro-preview if high thinking mode. Use gemini-3.5-flash for standard
+        val modelName = if (enableThinkingMode) "gemini-3.1-pro-preview" else "gemini-3.5-flash"
+        
+        val content = Content(parts = listOf(Part(text = prompt)))
+        val sysInstructionContent = systemInstruction?.let { Content(parts = listOf(Part(text = it))) }
+        
+        val generationConfig = if (enableThinkingMode) {
+            // High thinking configuration requested: set thinkingLevel = "HIGH", do not set maxOutputTokens
+            GenerationConfig(thinkingConfig = ThinkingConfig(thinkingLevel = "HIGH"))
+        } else {
+            GenerationConfig(temperature = 0.5f)
+        }
+
+        val request = GenerateContentRequest(
+            contents = listOf(content),
+            generationConfig = generationConfig,
+            systemInstruction = sysInstructionContent
+        )
+
+        try {
+            Log.d("AppRepository", "Calling Gemini with API Key length: ${apiKey.length}, model: $modelName")
+            val response = RetrofitClient.service.generateContent(
+                model = modelName,
+                apiKey = apiKey,
+                request = request
+            )
+            val candidates = response.candidates
+            val responseText = candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text 
+                ?: "Received no text candidate from Gemini API."
+            
+            // For pro-thinking visual simulation, we can produce thought logs alongside the reply text
+            val thoughtOutput = if (enableThinkingMode) {
+                "• Analyzed directory structures and semantic metadata.\n• Evaluated security clearance criteria.\n• Formulated response recommendations."
+            } else null
+
+            return Pair(responseText, thoughtOutput)
+        } catch (e: Exception) {
+            Log.e("AppRepository", "Error calling Gemini: ", e)
+            return Pair("Failed to contact Gemini: ${e.localizedMessage ?: e.message}. Ensure your API key is correctly active and configured.", null)
+        }
+    }
+}

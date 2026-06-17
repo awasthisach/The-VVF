@@ -1,0 +1,6 @@
+{
+  "name": "Smart Files",
+  "description": "Smart local file manager, Google Drive simulation, secure safe with PIN, scanner, cleaner, and built-in Gemini AI conversational helper.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
