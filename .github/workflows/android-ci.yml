@@ -22,9 +22,5 @@ jobs:
         java-version: '17'
         cache: 'gradle'
 
-    - name: Grant Execute Permission for Gradlew
-      run: chmod +x gradlew
-      continue-on-error: true # Safe fallback if custom template limits execution permissions initially
-
     - name: Run Unit & Robolectric Tests
-      run: ./gradlew testDebugUnitTest --no-daemon
+      run: gradle testDebugUnitTest --no-daemon
