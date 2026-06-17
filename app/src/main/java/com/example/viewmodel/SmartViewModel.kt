@@ -96,6 +96,60 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     private val _pinErrorMessage = MutableStateFlow<String?>(null)
     val pinErrorMessage: StateFlow<String?> = _pinErrorMessage.asStateFlow()
 
+    // --- Storage Cleaner Utility States ---
+    private val _storageSelectedFileIds = MutableStateFlow<Set<Long>>(emptySet())
+    val storageSelectedFileIds: StateFlow<Set<Long>> = _storageSelectedFileIds.asStateFlow()
+
+    private val _isStorageScanning = MutableStateFlow(false)
+    val isStorageScanning: StateFlow<Boolean> = _isStorageScanning.asStateFlow()
+
+    private val _storageScanProgress = MutableStateFlow(0f)
+    val storageScanProgress: StateFlow<Float> = _storageScanProgress.asStateFlow()
+
+    private val _storageCleanerActive = MutableStateFlow(false)
+    val storageCleanerActive: StateFlow<Boolean> = _storageCleanerActive.asStateFlow()
+
+    val scannedDuplicates: StateFlow<List<FileEntity>> = allLocalNonSafeFiles
+        .map { allFiles ->
+            val duplicates = allFiles.filter { it.isDuplicate }
+            val nameSizeGroups = allFiles.groupBy { it.name + "_" + it.size }
+            val matchDupes = nameSizeGroups.filter { it.value.size > 1 }.flatMap { it.value.drop(1) }
+            (duplicates + matchDupes).distinctBy { it.id }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val scannedLargeTempFiles: StateFlow<List<FileEntity>> = allLocalNonSafeFiles
+        .map { allFiles ->
+            allFiles.filter { file ->
+                file.isJunk || 
+                file.name.endsWith(".tmp", ignoreCase = true) || 
+                file.name.endsWith(".log", ignoreCase = true) || 
+                file.name.endsWith(".temp", ignoreCase = true) || 
+                file.size >= 5_000_000L // 5MB limit
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Animated Custom File Viewer States ---
+    private val _activeViewerFile = MutableStateFlow<FileEntity?>(null)
+    val activeViewerFile: StateFlow<FileEntity?> = _activeViewerFile.asStateFlow()
+
+    // --- Document Scanner Interface States ---
+    private val _isDocumentScannerActive = MutableStateFlow(false)
+    val isDocumentScannerActive: StateFlow<Boolean> = _isDocumentScannerActive.asStateFlow()
+
+    private val _isCameraCapturing = MutableStateFlow(false)
+    val isCameraCapturing: StateFlow<Boolean> = _isCameraCapturing.asStateFlow()
+
+    private val _scannedDocumentFilter = MutableStateFlow("original") // original, bw, contrast, grayscale
+    val scannedDocumentFilter: StateFlow<String> = _scannedDocumentFilter.asStateFlow()
+
+    private val _scannedFileName = MutableStateFlow("SCAN_2026.pdf")
+    val scannedFileName: StateFlow<String> = _scannedFileName.asStateFlow()
+
+    private val _scannedDocumentSaved = MutableStateFlow(false)
+    val scannedDocumentSaved: StateFlow<Boolean> = _scannedDocumentSaved.asStateFlow()
+
     // Google Cloud Sim States
     private val _connectedAccounts = MutableStateFlow(
         listOf("awasthi.sach@gmail.com", "workspace.admin@corporation.com", "sac.personal@outlook.com")
@@ -315,6 +369,114 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelJunkCleaner() {
         _cleanerState.value = CleanerState.Idle
         _cleanerProgress.value = 0f
+    }
+
+    // --- Storage Cleaner Utility Handlers ---
+    fun setStorageCleanerActive(active: Boolean) {
+        _storageCleanerActive.value = active
+        if (active) {
+            runStorageCleanerScan()
+        } else {
+            _storageSelectedFileIds.value = emptySet()
+        }
+    }
+
+    fun toggleStorageSelectedFile(id: Long) {
+        val current = _storageSelectedFileIds.value
+        _storageSelectedFileIds.value = if (current.contains(id)) current - id else current + id
+    }
+
+    fun selectAllStorageFiles(ids: List<Long>) {
+        _storageSelectedFileIds.value = ids.toSet()
+    }
+
+    fun selectNoStorageFiles() {
+        _storageSelectedFileIds.value = emptySet()
+    }
+
+    fun runStorageCleanerScan() {
+        viewModelScope.launch {
+            _isStorageScanning.value = true
+            _storageScanProgress.value = 0f
+            while (_storageScanProgress.value < 1.0f) {
+                delay(100)
+                _storageScanProgress.value += 0.1f
+            }
+            _storageScanProgress.value = 1.0f
+            _isStorageScanning.value = false
+        }
+    }
+
+    fun deleteSelectedStorageFiles() {
+        val toDelete = _storageSelectedFileIds.value
+        viewModelScope.launch {
+            toDelete.forEach { id ->
+                repository.deleteFileById(id)
+            }
+            _storageSelectedFileIds.value = emptySet()
+        }
+    }
+
+    // --- Custom Animated File Viewer Handlers ---
+    fun openFileInViewer(file: FileEntity) {
+        _activeViewerFile.value = file
+    }
+
+    fun closeFileInViewer() {
+        _activeViewerFile.value = null
+    }
+
+    // --- Document Scanner Interface Handlers ---
+    fun setDocumentScannerActive(active: Boolean) {
+        _isDocumentScannerActive.value = active
+        if (active) {
+            _isCameraCapturing.value = false
+            _scannedDocumentSaved.value = false
+            // Generate a default scanning filename using the current timestamp matching Google Drive format
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            _scannedFileName.value = "SCAN_$timestamp"
+            _scannedDocumentFilter.value = "original"
+        }
+    }
+
+    fun setScannedFilter(filter: String) {
+        _scannedDocumentFilter.value = filter
+    }
+
+    fun setScannedFileName(name: String) {
+        _scannedFileName.value = name
+    }
+
+    fun captureDocument() {
+        viewModelScope.launch {
+            _isCameraCapturing.value = true
+            delay(1200) // Shutter simulation with focus delay
+            _isCameraCapturing.value = false
+            _scannedDocumentSaved.value = true
+        }
+    }
+
+    fun saveScannedDocument(onSavedCompletable: () -> Unit = {}) {
+        val finalTitle = if (_scannedFileName.value.endsWith(".pdf")) _scannedFileName.value else "${_scannedFileName.value}.pdf"
+        viewModelScope.launch {
+            // Register file entity in Room local storage with appropriate PDF mime type
+            val newFile = FileEntity(
+                id = 0L,
+                name = finalTitle,
+                path = "/storage/emulated/0/Documents/Scans/$finalTitle",
+                size = (1024L * 1024L * 1.4f).toLong(), // 1.4 MB estimated scanned PDF size
+                lastModified = System.currentTimeMillis(),
+                mimeType = "application/pdf",
+                isLocal = true,
+                isSafe = false,
+                isDuplicate = false,
+                isJunk = false,
+                cloudAccountEmail = ""
+            )
+            repository.insertFile(newFile)
+            setDocumentScannerActive(false)
+            onSavedCompletable()
+        }
     }
 
     // --- Safe Folder State Actions ---
@@ -665,6 +827,365 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     private val _githubError = MutableStateFlow<String?>(null)
     val githubError: StateFlow<String?> = _githubError.asStateFlow()
 
+    // --- New GitHub Explorer & Conversational Chat states ---
+    private val _repositoryFiles = MutableStateFlow<List<GitHubRepoFile>>(emptyList())
+    val repositoryFiles: StateFlow<List<GitHubRepoFile>> = _repositoryFiles.asStateFlow()
+
+    private val _selectedRepoFile = MutableStateFlow<GitHubRepoFile?>(null)
+    val selectedRepoFile: StateFlow<GitHubRepoFile?> = _selectedRepoFile.asStateFlow()
+
+    private val _activeGitWorkspaceSubTab = MutableStateFlow(0) // 0: Overview, 1: Code Explorer & Chat
+    val activeGitWorkspaceSubTab: StateFlow<Int> = _activeGitWorkspaceSubTab.asStateFlow()
+
+    private val _repoChatHistory = MutableStateFlow<List<ChatMessageEntity>>(emptyList())
+    val repoChatHistory: StateFlow<List<ChatMessageEntity>> = _repoChatHistory.asStateFlow()
+
+    private val _isRepoChatGenerating = MutableStateFlow(false)
+    val isRepoChatGenerating: StateFlow<Boolean> = _isRepoChatGenerating.asStateFlow()
+
+    fun setGitWorkspaceSubTab(tab: Int) {
+        _activeGitWorkspaceSubTab.value = tab
+    }
+
+    fun selectRepoFile(file: GitHubRepoFile?) {
+        _selectedRepoFile.value = file
+    }
+
+    fun clearRepoChatHistory() {
+        val repoName = _githubRepoPath.value
+        _repoChatHistory.value = listOf(
+            ChatMessageEntity(
+                id = -1,
+                messageText = "Hello! I am Gemini, your dedicated Repository Analyst. I've analyzed **$repoName**.\n\nSelect any code file on the left file explorer panel to discuss its architecture, implementation details, or potential improvements directly with me here!",
+                sender = "gemini",
+                timestamp = System.currentTimeMillis()
+            )
+        )
+    }
+
+    fun renameRepoFile(fileId: String, newName: String) {
+        _repositoryFiles.value = _repositoryFiles.value.map { file ->
+            if (file.id == fileId) {
+                // Determine new path
+                val oldPath = file.path
+                val newPath = if (oldPath.contains("/")) {
+                    oldPath.substringBeforeLast("/") + "/" + newName
+                } else newName
+                val updatedFile = file.copy(name = newName, path = newPath)
+                if (_selectedRepoFile.value?.id == fileId) {
+                    _selectedRepoFile.value = updatedFile
+                }
+                updatedFile
+            } else {
+                file
+            }
+        }
+    }
+
+    fun deleteRepoFile(fileId: String) {
+        _repositoryFiles.value = _repositoryFiles.value.filter { it.id != fileId }
+        if (_selectedRepoFile.value?.id == fileId) {
+            _selectedRepoFile.value = _repositoryFiles.value.firstOrNull { !it.isDirectory }
+        }
+    }
+
+    fun runAiAnalysis(fileId: String, onAnalysisResult: (String) -> Unit) {
+        val file = _repositoryFiles.value.find { it.id == fileId } ?: return
+        viewModelScope.launch {
+            _isRepoChatGenerating.value = true
+            
+            val prompt = """
+                You are Gemini, an expert software architect. Please perform a deep, high-fidelity AI Analysis on this file from the repository, focusing on design patterns, memory usage, and structural optimization:
+                
+                File Name: ${file.name}
+                Path: ${file.path}
+                Content:
+                ```
+                ${file.content}
+                ```
+                
+                Please provide structured findings with bullet points and visual hierarchy.
+            """.trimIndent()
+            
+            val key = getActiveApiKey()
+            val replyText = if (key.isBlank()) {
+                "Gemini API key is not configured. Please supply a key to run live code analysis."
+            } else {
+                try {
+                    val (reply, _) = repository.callGemini(
+                        apiKey = key,
+                        prompt = prompt,
+                        systemInstruction = "You are an expert repository reviewer. Write concise but professional code reviews."
+                    )
+                    reply
+                } catch (e: Exception) {
+                    "Analysis Failed: ${e.localizedMessage}"
+                }
+            }
+            
+            // Append result to repo chat history
+            val userAnalysisMsg = ChatMessageEntity(
+                messageText = "Run AI Analysis on file: `${file.name}`",
+                sender = "user",
+                timestamp = System.currentTimeMillis()
+            )
+            val geminiAnalysisMsg = ChatMessageEntity(
+                messageText = "### AI Code Analysis for `${file.name}`\n\n$replyText",
+                sender = "gemini",
+                timestamp = System.currentTimeMillis()
+            )
+            _repoChatHistory.value = _repoChatHistory.value + listOf(userAnalysisMsg, geminiAnalysisMsg)
+            _isRepoChatGenerating.value = false
+            onAnalysisResult(replyText)
+        }
+    }
+
+    fun sendRepoChatMessage(message: String) {
+        if (message.isBlank()) return
+        viewModelScope.launch {
+            val userMsg = ChatMessageEntity(
+                messageText = message,
+                sender = "user",
+                timestamp = System.currentTimeMillis()
+            )
+            _repoChatHistory.value = _repoChatHistory.value + userMsg
+            
+            _isRepoChatGenerating.value = true
+            
+            val activeFile = _selectedRepoFile.value
+            val fileContext = if (activeFile != null) {
+                "The user is currently viewing the file '${activeFile.path}' which contains this code:\n" + "```" + "\n${activeFile.content}\n" + "```" + "\n\n"
+            } else {
+                "The user is viewing the repository directory structure.\n"
+            }
+            
+            val fullHistoryPrompt = _repoChatHistory.value.takeLast(6).joinToString("\n") { 
+                "${it.sender}: ${it.messageText}" 
+            }
+            
+            val prompt = """
+                You are Gemini, an expert software architect and repository advisor.
+                $fileContext
+                Here is the recent conversation history:
+                $fullHistoryPrompt
+                
+                Please provide a helpful, concise response analyzing the repository structures or answering the user's specific query. Use Markdown for styling or code blocks if needed.
+            """.trimIndent()
+            
+            val key = getActiveApiKey()
+            if (key.isBlank()) {
+                val errorMsg = ChatMessageEntity(
+                    messageText = "Gemini API key is not configured. Please open the API setup panel or ensure it is set as GEMINI_API_KEY in your env.",
+                    sender = "gemini",
+                    timestamp = System.currentTimeMillis()
+                )
+                _repoChatHistory.value = _repoChatHistory.value + errorMsg
+                _isRepoChatGenerating.value = false
+                return@launch
+            }
+            
+            try {
+                val (reply, _) = repository.callGemini(
+                    apiKey = key,
+                    prompt = prompt,
+                    systemInstruction = "You are an expert GitHub assistant. Help the user analyze repository code, structure, issues and commits.",
+                    enableThinkingMode = _highThinkingEnabled.value
+                )
+                
+                val geminiMsg = ChatMessageEntity(
+                    messageText = reply,
+                    sender = "gemini",
+                    timestamp = System.currentTimeMillis()
+                )
+                _repoChatHistory.value = _repoChatHistory.value + geminiMsg
+            } catch (e: Exception) {
+                val err = ChatMessageEntity(
+                    messageText = "Failed to communicate with Gemini: ${e.localizedMessage}",
+                    sender = "gemini",
+                    timestamp = System.currentTimeMillis()
+                )
+                _repoChatHistory.value = _repoChatHistory.value + err
+            } finally {
+                _isRepoChatGenerating.value = false
+            }
+        }
+    }
+
+    fun generateSimulatedRepoFiles(repoPath: String): List<GitHubRepoFile> {
+        val cleaned = repoPath.trim().replace("\\s+".toRegex(), "")
+        val parts = cleaned.split("/")
+        val owner = parts.getOrNull(0) ?: "google"
+        val repo = parts.getOrNull(1) ?: "dagger"
+        
+        val files = mutableListOf<GitHubRepoFile>()
+        
+        fun addFile(path: String, isDir: Boolean, sizeKB: Long, dynamicContent: String) {
+            val name = path.substringAfterLast("/")
+            val parent = if (path.contains("/")) path.substringBeforeLast("/") else ""
+            files.add(
+                GitHubRepoFile(
+                    id = path.hashCode().toString(),
+                    path = path,
+                    name = name,
+                    isDirectory = isDir,
+                    size = sizeKB * 1024L,
+                    content = dynamicContent,
+                    parentPath = parent
+                )
+            )
+        }
+        
+        // Root directories
+        addFile("src", true, 0, "")
+        addFile("src/main", true, 0, "")
+        addFile("src/main/java", true, 0, "")
+        addFile("src/main/java/com", true, 0, "")
+        addFile("src/main/java/com/example", true, 0, "")
+        addFile("gradle", true, 0, "")
+        addFile("gradle/wrapper", true, 0, "")
+        
+        // Root files
+        addFile("README.md", false, 4, """
+            # $repo
+            
+            Welcome to **$repo**, maintained by **$owner**. This repository has been successfully synchronized using the Gemini code intelligence suite.
+            
+            ## Features
+            - **High-Velocity dependency compilation**: Designed for enterprise-scale integration pipelines.
+            - **Type-Safe Injection Interfaces**: Validated compile-time code trees preventing null references.
+            - **Multi-Modular Service Routing**: Pre-packaged component charts mapping complex structures.
+            
+            ## Installation & Usage
+            To import $repo into your development configuration:
+            ```kotlin
+            dependencies {
+                implementation("$owner:$repo:2.48.1")
+            }
+            ```
+            
+            Configure the central system router:
+            ```kotlin
+            @Component(modules = [ServiceRouter::class])
+            interface EnterpriseRouter {
+                fun getAgent(): SecurityAgent
+            }
+            ```
+        """.trimIndent())
+        
+        addFile("build.gradle.kts", false, 3, """
+            plugins {
+                kotlin("jvm") version "1.9.22"
+                kotlin("kapt") version "1.9.22"
+            }
+            
+            group = "com.example"
+            version = "1.0.0-SNAPSHOT"
+            
+            repositories {
+                mavenCentral()
+                google()
+            }
+            
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+                implementation("com.google.dagger:dagger:2.48.1")
+                kapt("com.google.dagger:dagger-compiler:2.48.1")
+            }
+        """.trimIndent())
+        
+        addFile("settings.gradle.kts", false, 1, """
+            rootProject.name = "$repo"
+            include(":app")
+            include(":core")
+        """.trimIndent())
+        
+        // Source files under com/example
+        addFile("src/main/java/com/example/di", true, 0, "")
+        addFile("src/main/java/com/example/model", true, 0, "")
+        addFile("src/main/java/com/example/service", true, 0, "")
+        
+        addFile("src/main/java/com/example/model/User.kt", false, 2, """
+            package com.example.model
+            
+            /**
+             * Business model representing an authorized system persona.
+             */
+            data class User(
+                val id: Long,
+                val username: String,
+                val email: String,
+                val activeRole: String
+            )
+        """.trimIndent())
+        
+        addFile("src/main/java/com/example/service/UserService.kt", false, 3, """
+            package com.example.service
+            
+            import com.example.model.User
+            import javax.inject.Inject
+            import javax.inject.Singleton
+            
+            @Singleton
+            class UserService @Inject constructor(
+                private val databaseBroker: DatabaseBroker,
+                private val cacheBroker: CacheBroker
+            ) {
+                fun fetchUserCredentials(userId: Long): User {
+                    val raw = databaseBroker.query("SELECT * FROM users WHERE id = " + userId)
+                    return User(userId, "simulated_user", "dev@aistudio.com", "ADMIN")
+                }
+            }
+        """.trimIndent())
+        
+        addFile("src/main/java/com/example/di/AppModule.kt", false, 3, """
+            package com.example.di
+            
+            import dagger.Module
+            import dagger.Provides
+            import javax.inject.Singleton
+            
+            @Module
+            class AppModule {
+                @Provides
+                @Singleton
+                fun provideDatabaseBroker(): DatabaseBroker {
+                    return SqliteDatabaseBroker(url = "jdbc:sqlite::memory:")
+                }
+                
+                @Provides
+                @Singleton
+                fun provideCacheBroker(): CacheBroker {
+                    return RedisCacheBroker(ttl = 3600L)
+                }
+            }
+        """.trimIndent())
+        
+        addFile("src/main/java/com/example/di/AppComponent.kt", false, 2, """
+            package com.example.di
+            
+            import dagger.Component
+            import com.example.service.UserService
+            import javax.inject.Singleton
+            
+            @Singleton
+            @Component(modules = [AppModule::class])
+            interface AppComponent {
+                fun getUserService(): UserService
+                fun inject(broker: SecurityBroker)
+            }
+        """.trimIndent())
+        
+        addFile("gradle/wrapper/gradle-wrapper.properties", false, 1, """
+            distributionBase=GRADLE_USER_HOME
+            distributionPath=wrapper/dists
+            distributionUrl=https://services.gradle.org/distributions/gradle-8.5-bin.zip
+            zipStoreBase=GRADLE_USER_HOME
+            zipStorePath=wrapper/dists
+        """.trimIndent())
+        
+        return files
+    }
+
     fun setCloudSubTab(tab: Int) {
         _activeCloudSubTab.value = tab
     }
@@ -680,7 +1201,13 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isGithubLoading.value = true
             _githubError.value = null
-            
+
+            // Reload simulated files & reset chat context
+            val simulatedFiles = generateSimulatedRepoFiles(repoPath)
+            _repositoryFiles.value = simulatedFiles
+            _selectedRepoFile.value = simulatedFiles.firstOrNull { it.path == "README.md" } ?: simulatedFiles.firstOrNull { !it.isDirectory }
+            clearRepoChatHistory()
+
             val parts = repoPath.trim().split("/")
             if (parts.size != 2 || parts[0].isBlank() || parts[1].isBlank()) {
                 _githubError.value = "Invalid repository format. Please use 'owner/repo' structure (e.g. google/dagger)"
@@ -1044,6 +1571,22 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     fun clearGeneratedReadme() {
         _generatedReadme.value = null
         _readmeThinkingProcess.value = null
+    }
+
+    fun addLocalSimulatedFile(name: String, size: Long, mimeType: String, path: String) {
+        viewModelScope.launch {
+            repository.insertFiles(listOf(FileEntity(
+                id = 0L,
+                name = name,
+                path = path,
+                size = size,
+                lastModified = System.currentTimeMillis(),
+                mimeType = mimeType,
+                isLocal = true,
+                isSafe = false,
+                cloudAccountEmail = ""
+            )))
+        }
     }
 
     private fun getInitialConflictFiles(): List<ConflictFile> {

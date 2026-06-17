@@ -11,6 +11,16 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
+data class GitHubRepoFile(
+    val id: String,
+    val path: String,
+    val name: String,
+    val isDirectory: Boolean,
+    val size: Long = 0,
+    val content: String = "",
+    val parentPath: String = ""
+)
+
 @JsonClass(generateAdapter = true)
 data class GitHubUser(
     @Json(name = "login") val login: String,
