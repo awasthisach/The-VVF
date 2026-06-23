@@ -42,7 +42,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.ChatMessageEntity
 import com.example.data.FileEntity
 import com.example.ui.theme.BorderDark
-import com.example.ui.theme.SurfaceDarkHeader
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import com.example.data.GitHubRepoFile
@@ -93,17 +92,85 @@ fun MainLayout(viewModel: SmartViewModel) {
             }
         }
     ) { paddingValues ->
-        Box(
+        val isDarkTheme by viewModel.isDarkMode.collectAsStateWithLifecycle()
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            when (activeTab) {
-                0 -> CleanScreen(viewModel)
-                1 -> BrowseScreen(viewModel)
-                2 -> CloudManagerScreen(viewModel)
-                3 -> AiAssistantScreen(viewModel)
+            // Elegant top row with title and dynamic Material Theme switch pill
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = "Smart Icon",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "Smart Files",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Developer Console",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        .clickable { viewModel.setDarkMode(!isDarkTheme) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("global_theme_toggle"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                        contentDescription = "Theme Toggle",
+                        tint = if (isDarkTheme) Color(0xFF60A5FA) else Color(0xFFF59E0B),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (isDarkTheme) "Dark Mode" else "Light Mode",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                when (activeTab) {
+                    0 -> CleanScreen(viewModel)
+                    1 -> BrowseScreen(viewModel)
+                    2 -> CloudManagerScreen(viewModel)
+                    3 -> AiAssistantScreen(viewModel)
+                }
             }
         }
     }
@@ -833,7 +900,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                SurfaceDarkHeader.copy(alpha = 0.3f),
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                                 MaterialTheme.colorScheme.background
                             )
                         )
@@ -1668,7 +1735,7 @@ fun CloudManagerScreen(viewModel: SmartViewModel) {
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(
             selectedTabIndex = activeSubTab,
-            containerColor = SurfaceDarkHeader,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.primary,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1691,7 +1758,7 @@ fun CloudManagerScreen(viewModel: SmartViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SurfaceDarkHeader)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(16.dp)
             ) {
             Column {
@@ -2155,7 +2222,7 @@ fun AiAssistantScreen(viewModel: SmartViewModel) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(SurfaceDarkHeader)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(16.dp)
         ) {
             Column {
@@ -2506,6 +2573,20 @@ fun GitHubTrackerScreen(viewModel: SmartViewModel) {
     var editingRepoPath by remember(repoPath) { mutableStateOf(repoPath) }
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
+    fun formatLastSynced(timestamp: Long): String {
+        if (timestamp == 0L) return "Never synced"
+        val diff = System.currentTimeMillis() - timestamp
+        if (diff < 0) return "Just now"
+        val seconds = diff / 1000
+        if (seconds < 60) return "Just now"
+        val minutes = seconds / 60
+        if (minutes < 60) return "${minutes}m ago"
+        val hours = minutes / 60
+        if (hours < 24) return "${hours}h ago"
+        val days = hours / 24
+        return "${days}d ago"
+    }
+
     // State, Backdrop scrim, and animations for Side Panel
     var showCommitHistoryPanel by remember { mutableStateOf(false) }
     
@@ -2632,6 +2713,177 @@ fun GitHubTrackerScreen(viewModel: SmartViewModel) {
                                 color = MaterialTheme.colorScheme.error,
                                 lineHeight = 14.sp
                             )
+                        }
+                    }
+                }
+            }
+
+            // Tracked Repositories Status & Sync History List Card
+            item {
+                val trackedRepos by viewModel.trackedRepositories.collectAsStateWithLifecycle()
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("tracked_repos_status_card"),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.History,
+                                contentDescription = "History icon",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Tracked Repositories Status",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (trackedRepos.isEmpty()) {
+                            Text(
+                                text = "No tracked repositories yet. Enter a path above to start tracking.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                trackedRepos.forEach { repo ->
+                                    val isActive = repo.path == repoPath
+                                    
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(
+                                                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                                            )
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                                else Color.Transparent,
+                                                shape = RoundedCornerShape(12.dp)
+                                            )
+                                            .clickable {
+                                                if (!isActive) {
+                                                    viewModel.updateGithubRepoPath(repo.path)
+                                                }
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isActive) Icons.Filled.Bookmark else Icons.Filled.Folder,
+                                                    contentDescription = "Repo status",
+                                                    tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Text(
+                                                    text = repo.path,
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (isActive) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                                        modifier = Modifier.padding(start = 4.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "ACTIVE",
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(6.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            when (repo.status) {
+                                                                "Synced" -> Color(0xFF22C55E)
+                                                                "Synced (Simulated)" -> Color(0xFF3B82F6)
+                                                                "Syncing" -> Color(0xFFF59E0B)
+                                                                "Failed" -> Color(0xFFEF4444)
+                                                                else -> Color.Gray
+                                                            }
+                                                        )
+                                                )
+                                                Text(
+                                                    text = "${repo.status} • Last synced: ${formatLastSynced(repo.lastSynced)}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                                )
+                                            }
+                                        }
+
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            IconButton(
+                                                onClick = { viewModel.fetchGitHubData(repo.path) },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Refresh,
+                                                    contentDescription = "Force sync repo",
+                                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                            
+                                            IconButton(
+                                                onClick = { viewModel.removeTrackedRepository(repo.path) },
+                                                enabled = !isActive,
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Delete,
+                                                    contentDescription = "Remove tracker",
+                                                    tint = if (isActive) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f) 
+                                                           else MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -3581,7 +3833,7 @@ fun GitHubTrackerScreen(viewModel: SmartViewModel) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(SurfaceDarkHeader)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween

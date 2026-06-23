@@ -17,6 +17,12 @@ data class GitSyncState(
     val latestSyncActionMessage: String = "No recent actions"
 )
 
+data class TrackedRepository(
+    val path: String,
+    val lastSynced: Long,
+    val status: String // "Synced", "Failed", "Syncing"
+)
+
 data class ConflictBlock(
     val id: String,
     val lineStart: Int,

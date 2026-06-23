@@ -43,6 +43,15 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     private val _highThinkingEnabled = MutableStateFlow(sharedPrefs.getBoolean("high_thinking", false))
     val highThinkingEnabled: StateFlow<Boolean> = _highThinkingEnabled.asStateFlow()
 
+    // Global Dark Mode Theme state (Default to dark mode to provide a more developer-friendly interface)
+    private val _isDarkMode = MutableStateFlow(sharedPrefs.getBoolean("is_dark_mode", true))
+    val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
+
+    fun setDarkMode(dark: Boolean) {
+        _isDarkMode.value = dark
+        sharedPrefs.edit().putBoolean("is_dark_mode", dark).apply()
+    }
+
     private val _isApiPanelExpanded = MutableStateFlow(false)
     val isApiPanelExpanded: StateFlow<Boolean> = _isApiPanelExpanded.asStateFlow()
 
@@ -231,6 +240,8 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val readmeThinkingProcess: StateFlow<String?> = _readmeThinkingProcess.asStateFlow()
 
     init {
+        // Initialize tracked repository list from sharedPrefs
+        loadTrackedRepositories()
         viewModelScope.launch {
             // Check & initialize base mock data if DB is empty
             repository.checkAndInitializeData()
@@ -815,6 +826,43 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     private val _githubRepoPath = MutableStateFlow(sharedPrefs.getString("github_repo_path", "google/dagger") ?: "google/dagger")
     val githubRepoPath: StateFlow<String> = _githubRepoPath.asStateFlow()
 
+    private val _trackedRepositories = MutableStateFlow<List<com.example.data.TrackedRepository>>(emptyList())
+    val trackedRepositories: StateFlow<List<com.example.data.TrackedRepository>> = _trackedRepositories.asStateFlow()
+
+    fun loadTrackedRepositories() {
+        val repoPaths = sharedPrefs.getStringSet("tracked_repos_set", null) ?: setOf("google/dagger")
+        val list = repoPaths.map { path ->
+            val lastSynced = sharedPrefs.getLong("repo_sync_time_$path", 0L)
+            val status = sharedPrefs.getString("repo_sync_status_$path", "Synced") ?: "Synced"
+            com.example.data.TrackedRepository(path, lastSynced, status)
+        }
+        _trackedRepositories.value = list.sortedBy { it.path }
+    }
+
+    fun saveTrackedRepository(path: String, lastSynced: Long, status: String) {
+        val currentSet = sharedPrefs.getStringSet("tracked_repos_set", null) ?: setOf("google/dagger")
+        val newSet = currentSet.toMutableSet()
+        newSet.add(path)
+        sharedPrefs.edit()
+            .putStringSet("tracked_repos_set", newSet)
+            .putLong("repo_sync_time_$path", lastSynced)
+            .putString("repo_sync_status_$path", status)
+            .apply()
+        loadTrackedRepositories()
+    }
+
+    fun removeTrackedRepository(path: String) {
+        val currentSet = sharedPrefs.getStringSet("tracked_repos_set", null) ?: setOf("google/dagger")
+        val newSet = currentSet.toMutableSet()
+        newSet.remove(path)
+        sharedPrefs.edit()
+            .putStringSet("tracked_repos_set", newSet)
+            .remove("repo_sync_time_$path")
+            .remove("repo_sync_status_$path")
+            .apply()
+        loadTrackedRepositories()
+    }
+
     private val _githubIssues = MutableStateFlow<List<GitHubIssue>>(emptyList())
     val githubIssues: StateFlow<List<GitHubIssue>> = _githubIssues.asStateFlow()
 
@@ -1201,6 +1249,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isGithubLoading.value = true
             _githubError.value = null
+            saveTrackedRepository(repoPath, sharedPrefs.getLong("repo_sync_time_$repoPath", 0L), "Syncing")
 
             // Reload simulated files & reset chat context
             val simulatedFiles = generateSimulatedRepoFiles(repoPath)
@@ -1214,6 +1263,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
                 _githubIssues.value = getFallbackIssues()
                 _githubCommits.value = getFallbackCommits()
                 _isGithubLoading.value = false
+                saveTrackedRepository(repoPath, sharedPrefs.getLong("repo_sync_time_$repoPath", 0L), "Failed")
                 return@launch
             }
 
@@ -1235,10 +1285,12 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
                 // Fetch commits via retrofit client
                 val liveCommits = GitHubRetrofitClient.service.getRecentCommits(owner, repo, sinceDate)
                 _githubCommits.value = liveCommits
+                saveTrackedRepository(repoPath, System.currentTimeMillis(), "Synced")
             } catch (e: Exception) {
                 _githubError.value = "Live Fetch failed: ${e.localizedMessage ?: "Connection Timeout"}. Displaying high-fidelity simulated tracker data for demo."
                 _githubIssues.value = getFallbackIssues()
                 _githubCommits.value = getFallbackCommits()
+                saveTrackedRepository(repoPath, System.currentTimeMillis(), "Synced (Simulated)")
             } finally {
                 _isGithubLoading.value = false
             }

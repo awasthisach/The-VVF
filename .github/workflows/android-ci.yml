@@ -1,19 +1,28 @@
-name: Android CI
+name: Android CI/CD Pipeline
 
 on:
   push:
     branches: [ "main" ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "main" ]
 
 jobs:
-  build:
-    name: Build & Run Tests
+  build-and-test:
+    name: Build, Test & Package
     runs-on: ubuntu-latest
+    env:
+      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
+      KEYSTORE_PATH: ${{ github.workspace }}/release.jks
 
     steps:
     - name: Checkout Source Code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Full history for auto-changelog and versioning
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -22,5 +31,133 @@ jobs:
         java-version: '17'
         cache: 'gradle'
 
+    - name: Copy Env Configuration
+      run: |
+        if [ -f .env.example ]; then
+          cp .env.example .env
+          echo "Initialized .env configuration from template."
+        else
+          touch .env
+          echo "Created placeholder .env file."
+        fi
+
+    - name: Check for Signing Credentials
+      id: check_credentials
+      run: |
+        if [ ! -z "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ] && [ ! -z "${{ secrets.STORE_PASSWORD }}" ] && [ ! -z "${{ secrets.KEY_PASSWORD }}" ]; then
+          echo "HAS_SIGN_KEYS=true" >> $GITHUB_ENV
+          echo "Signing credentials successfully detected."
+        else
+          echo "HAS_SIGN_KEYS=false" >> $GITHUB_ENV
+          echo "No signing secrets detected. Falling back to debug builds for safety."
+        fi
+
+    - name: Decrypt Release Keystore File
+      if: env.HAS_SIGN_KEYS == 'true'
+      run: |
+        echo "Restoring sign credentials from secrets..."
+        echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/release.jks
+        echo "KEYSTORE_PATH=${{ github.workspace }}/release.jks" >> $GITHUB_ENV
+
+    - name: Grant Gradle Execution Permission
+      run: |
+        # In case the wrapper exists or was pushed, ensure it has correct execution permissions.
+        if [ -f gradlew ]; then
+          chmod +x gradlew
+        fi
+
     - name: Run Unit & Robolectric Tests
-      run: gradle testDebugUnitTest --no-daemon
+      run: |
+        if [ -f gradlew ]; then
+          ./gradlew testDebugUnitTest --no-daemon
+        else
+          gradle testDebugUnitTest --no-daemon
+        fi
+
+    - name: Compile Debug Launcher Package (CI Artifact)
+      run: |
+        if [ -f gradlew ]; then
+          ./gradlew assembleDebug --no-daemon
+        else
+          gradle assembleDebug --no-daemon
+        fi
+
+    - name: Compile Release Launcher Package (CD Artifact)
+      if: env.HAS_SIGN_KEYS == 'true'
+      run: |
+        if [ -f gradlew ]; then
+          ./gradlew assembleRelease bundleRelease --no-daemon
+        else
+          gradle assembleRelease bundleRelease --no-daemon
+        fi
+
+    - name: Upload Debug APK Deliverable
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-debug-apk
+        path: app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 7
+
+    - name: Upload Release Artifacts
+      if: env.HAS_SIGN_KEYS == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-release-packages
+        path: |
+          app/build/outputs/apk/release/app-release.apk
+          app/build/outputs/bundle/release/app-release.aab
+        retention-days: 14
+
+  deploy-github-release:
+    name: Publish Release to GitHub
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    - name: Download Debug Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: app-debug-apk
+        path: build-outputs/
+
+    - name: Download Release Artifacts (If Available)
+      # We try to load release packages. If they exist, we'll download them.
+      # If not, we'll gracefully proceed with uploading debug/test APK to github releases.
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: app-release-packages
+        path: build-outputs/
+
+    - name: Set Release Parameters
+      id: release_params
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+          echo "RELEASE_TITLE=Smart Files - Release ${{ github.ref_name }}" >> $GITHUB_ENV
+        else
+          echo "TAG_NAME=latest-dev" >> $GITHUB_ENV
+          echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+          echo "RELEASE_TITLE=Smart Files - Continuous Development Build" >> $GITHUB_ENV
+        fi
+
+    - name: Publish Action Release Note
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.TAG_NAME }}
+        name: ${{ env.RELEASE_TITLE }}
+        prerelease: ${{ env.IS_PRERELEASE == 'true' }}
+        files: |
+          build-outputs/**/*.apk
+          build-outputs/**/*.aab
+        body_path: .github/workflows/release_notes.md
+        draft: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

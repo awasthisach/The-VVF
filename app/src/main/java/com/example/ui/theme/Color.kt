@@ -7,6 +7,8 @@ val PrimaryLight = Color(0xFF3B82F6) // Oceanic Blue
 val SecondaryLight = Color(0xFF6366F1) // Indigo Accent
 val BackgroundLight = Color(0xFFF8FAFC) // Light Slate Base
 val SurfaceLight = Color(0xFFFFFFFF) // White Cards
+val SurfaceLightHeader = Color(0xFFEEF2F6) // Sleek Light Gray Cards and Headers
+val BorderLight = Color(0xFFE2E8F0) // Light Edge Borders
 val OnBackgroundLight = Color(0xFF0F172A)
 val OnSurfaceLight = Color(0xFF1E293B)
 
