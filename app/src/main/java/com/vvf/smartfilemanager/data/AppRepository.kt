@@ -184,10 +184,24 @@ class AppRepository(private val db: AppDatabase) {
     suspend fun cleanAllJunk() = fileDao.clearAllJunk()
 
     suspend fun scanAndSaveRealFiles(context: Context) {
-        val realFiles = MediaStoreScanner.scanLocalFiles(context)
-        if (realFiles.isNotEmpty()) {
+        val scanner = MediaStoreScanner(context)
+        val scannedFiles = scanner.scanAllFiles()
+        if (scannedFiles.isNotEmpty()) {
+            val fileEntities = scannedFiles.map { scanned ->
+                FileEntity(
+                    name = scanned.name,
+                    path = scanned.path,
+                    size = scanned.size,
+                    lastModified = System.currentTimeMillis(),
+                    mimeType = scanned.mimeType,
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false
+                )
+            }
             fileDao.clearLocalNonSafeFiles()
-            fileDao.insertFiles(realFiles)
+            fileDao.insertFiles(fileEntities)
         }
     }
 

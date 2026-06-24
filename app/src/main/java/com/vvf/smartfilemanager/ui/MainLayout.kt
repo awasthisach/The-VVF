@@ -45,6 +45,7 @@ import com.vvf.smartfilemanager.ui.theme.BorderDark
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import com.vvf.smartfilemanager.data.GitHubRepoFile
+import com.vvf.smartfilemanager.data.ScannedFile
 import com.vvf.smartfilemanager.viewmodel.*
 
 @Composable
@@ -861,7 +862,8 @@ fun CleanScreen(viewModel: SmartViewModel) {
 
 // ==========================================
 // SCREEN 2: GOOGLE FILES BROWSE SCREEN
-/fun BrowseScreen(viewModel: SmartViewModel) {
+@Composable
+fun BrowseScreen(viewModel: SmartViewModel) {
     val context = LocalContext.current
     val files by viewModel.allLocalNonSafeFiles.collectAsStateWithLifecycle()
     val searchQueries by viewModel.localSearchQuery.collectAsStateWithLifecycle()
@@ -1864,14 +1866,6 @@ fun CleanScreen(viewModel: SmartViewModel) {
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}                             }
                             }
                         }
                     }
