@@ -76,8 +76,6 @@ dependencies {
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.paging.compose)
-    implementation(libs.hilt.android)
-    "ksp"(libs.hilt.compiler)
     implementation(libs.coil.compose)
     implementation(libs.converter.moshi)
     implementation(libs.kotlinx.coroutines.android)

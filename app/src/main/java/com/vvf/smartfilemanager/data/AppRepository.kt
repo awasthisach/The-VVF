@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.firstOrNull
 import java.io.File
 
@@ -227,11 +228,8 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
                 }
                 // Insert chunk into the database, keeping peak JVM memory extremely low (O(1) with respect to total device files)
                 try {
-                    db.runInTransaction {
-                        // Batch insert
-                        kotlinx.coroutines.runBlocking {
-                            fileDao.insertFiles(fileEntities)
-                        }
+                    db.withTransaction {
+                        fileDao.insertFiles(fileEntities)
                     }
                 } catch (e: Exception) {
                     Log.e("AppRepository", "Failed to insert batch chunk of size ${chunk.size}", e)

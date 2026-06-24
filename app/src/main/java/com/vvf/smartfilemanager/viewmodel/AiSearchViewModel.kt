@@ -161,9 +161,19 @@ class AiSearchViewModel(
                 "Initializing advanced thinking tree...\nContacting Gemini models secure api..."
             } else null
 
-            val localFilesStr = repository.allLocalNonSafeFiles.firstOrNull()?.joinToString { "${it.name} (${formatSizeFormatter(it.size)})" } ?: "None"
-            val safeFilesStr = repository.allSafeFiles.firstOrNull()?.joinToString { it.name } ?: "None"
-            val cloudFilesStr = cloudFilesList.joinToString { "${it.name} (${formatSizeFormatter(it.size)})" }
+            val localFilesList = repository.allLocalNonSafeFiles.firstOrNull() ?: emptyList()
+            val localFilesTruncated = localFilesList.take(20)
+            val localFilesStr = localFilesTruncated.joinToString { "${it.name} (${formatSizeFormatter(it.size)})" } + 
+                    (if (localFilesList.size > 20) " ... and ${localFilesList.size - 20} more files" else "")
+
+            val safeFilesList = repository.allSafeFiles.firstOrNull() ?: emptyList()
+            val safeFilesTruncated = safeFilesList.take(20)
+            val safeFilesStr = safeFilesTruncated.joinToString { it.name } + 
+                    (if (safeFilesList.size > 20) " ... and ${safeFilesList.size - 20} more files" else "")
+
+            val cloudFilesTruncated = cloudFilesList.take(20)
+            val cloudFilesStr = cloudFilesTruncated.joinToString { "${it.name} (${formatSizeFormatter(it.size)})" } + 
+                    (if (cloudFilesList.size > 20) " ... and ${cloudFilesList.size - 20} more files" else "")
 
             val systemInstruction = "You are the smart file and cloud manager virtual assistant. " +
                     "Here is the user's active file systems metadata:\n" +
