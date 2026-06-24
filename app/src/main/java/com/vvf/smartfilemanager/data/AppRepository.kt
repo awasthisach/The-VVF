@@ -2,11 +2,13 @@ package com.vvf.smartfilemanager.data
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 import java.io.File
 
-class AppRepository(private val db: AppDatabase) {
+class AppRepository(private val db: AppDatabase) : IAppRepository {
 
     private val fileDao = db.fileDao()
     private val categoryDao = db.categoryDao()
@@ -14,18 +16,38 @@ class AppRepository(private val db: AppDatabase) {
     private val chatDao = db.chatMessageDao()
 
     // Flow Accessors
-    val allLocalNonSafeFiles: Flow<List<FileEntity>> = fileDao.getLocalNonSafeFiles()
-    val allSafeFiles: Flow<List<FileEntity>> = fileDao.getSafeFiles()
-    val duplicateFiles: Flow<List<FileEntity>> = fileDao.getDuplicateFiles()
-    val junkFiles: Flow<List<FileEntity>> = fileDao.getJunkFiles()
-    val chatHistory: Flow<List<ChatMessageEntity>> = chatDao.getChatHistory()
+    override val allLocalNonSafeFiles: Flow<List<FileEntity>> = fileDao.getLocalNonSafeFiles()
+    override val allSafeFiles: Flow<List<FileEntity>> = fileDao.getSafeFiles()
+    override val duplicateFiles: Flow<List<FileEntity>> = fileDao.getDuplicateFiles()
+    override val junkFiles: Flow<List<FileEntity>> = fileDao.getJunkFiles()
+    override val chatHistory: Flow<List<ChatMessageEntity>> = chatDao.getChatHistory()
 
-    fun getCloudFilesForAccount(email: String): Flow<List<FileEntity>> {
+    override val localNonSafeFilesTotalSize: Flow<Long> = fileDao.getLocalNonSafeFilesTotalSize()
+    override val junkFilesTotalSize: Flow<Long> = fileDao.getJunkFilesTotalSize()
+    override val duplicateFilesTotalSize: Flow<Long> = fileDao.getDuplicateFilesTotalSize()
+
+    override val localNonSafeFilesCount: Flow<Int> = fileDao.getLocalNonSafeFilesCount()
+    override val safeFilesCount: Flow<Int> = fileDao.getSafeFilesCount()
+    override val duplicateFilesCount: Flow<Int> = fileDao.getDuplicateFilesCount()
+
+    override fun searchLocalNonSafeFiles(query: String, category: String, limit: Int): Flow<List<FileEntity>> {
+        return fileDao.searchLocalNonSafeFiles(query, category, limit)
+    }
+
+    override fun getScannedDuplicates(limit: Int): Flow<List<FileEntity>> {
+        return fileDao.getScannedDuplicates(limit)
+    }
+
+    override fun getLargeTempFiles(limit: Int): Flow<List<FileEntity>> {
+        return fileDao.getLargeTempFiles(limit)
+    }
+
+    override fun getCloudFilesForAccount(email: String): Flow<List<FileEntity>> {
         return fileDao.getCloudFiles(email)
     }
 
     // Initialize Database with satisfying initial entries if empty
-    suspend fun checkAndInitializeData() {
+    override suspend fun checkAndInitializeData() {
         val existingFiles = fileDao.getAllFiles().firstOrNull()
         if (existingFiles.isNullOrEmpty()) {
             val initialFiles = listOf(
@@ -176,50 +198,63 @@ class AppRepository(private val db: AppDatabase) {
     }
 
     // CRUD database actions
-    suspend fun insertFile(file: FileEntity): Long = fileDao.insertFile(file)
-    suspend fun insertFiles(files: List<FileEntity>) = fileDao.insertFiles(files)
-    suspend fun updateFile(file: FileEntity) = fileDao.updateFile(file)
-    suspend fun deleteFile(file: FileEntity) = fileDao.deleteFile(file)
-    suspend fun deleteFileById(id: Long) = fileDao.deleteFileById(id)
-    suspend fun cleanAllJunk() = fileDao.clearAllJunk()
+    override suspend fun insertFile(file: FileEntity): Long = fileDao.insertFile(file)
+    override suspend fun insertFiles(files: List<FileEntity>) = fileDao.insertFiles(files)
+    override suspend fun updateFile(file: FileEntity) = fileDao.updateFile(file)
+    override suspend fun deleteFile(file: FileEntity) = fileDao.deleteFile(file)
+    override suspend fun deleteFileById(id: Long) = fileDao.deleteFileById(id)
+    override suspend fun cleanAllJunk() = fileDao.clearAllJunk()
+    override suspend fun moveFilesToSafe(ids: Set<Long>) = fileDao.moveFilesToSafe(ids)
+    override suspend fun restoreFilesFromSafe(ids: Set<Long>) = fileDao.restoreFilesFromSafe(ids)
 
-    suspend fun scanAndSaveRealFiles(context: Context) {
+    override suspend fun scanAndSaveRealFiles(context: Context) = withContext(Dispatchers.IO) {
         val scanner = MediaStoreScanner(context)
-        val scannedFiles = scanner.scanAllFiles()
-        if (scannedFiles.isNotEmpty()) {
-            val fileEntities = scannedFiles.map { scanned ->
-                FileEntity(
-                    name = scanned.name,
-                    path = scanned.path,
-                    size = scanned.size,
-                    lastModified = System.currentTimeMillis(),
-                    mimeType = scanned.mimeType,
-                    isLocal = true,
-                    isSafe = false,
-                    isDuplicate = false,
-                    isJunk = false
-                )
+        fileDao.clearLocalNonSafeFiles()
+        scanner.scanAllFilesPaged(chunkSize = 1000) { chunk ->
+            if (chunk.isNotEmpty()) {
+                val fileEntities = chunk.map { scanned ->
+                    FileEntity(
+                        name = scanned.name,
+                        path = scanned.path,
+                        size = scanned.size,
+                        lastModified = System.currentTimeMillis(),
+                        mimeType = scanned.mimeType,
+                        isLocal = true,
+                        isSafe = false,
+                        isDuplicate = false,
+                        isJunk = false
+                    )
+                }
+                // Insert chunk into the database, keeping peak JVM memory extremely low (O(1) with respect to total device files)
+                try {
+                    db.runInTransaction {
+                        // Batch insert
+                        kotlinx.coroutines.runBlocking {
+                            fileDao.insertFiles(fileEntities)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("AppRepository", "Failed to insert batch chunk of size ${chunk.size}", e)
+                }
             }
-            fileDao.clearLocalNonSafeFiles()
-            fileDao.insertFiles(fileEntities)
         }
     }
 
     // PIN / Secure Safe State Logic
-    suspend fun getPIN(): String? {
+    override suspend fun getPIN(): String? {
         return secureStateDao.getStateByKey("SAFE_PIN")?.stateValue
     }
 
-    suspend fun setPIN(pin: String) {
+    override suspend fun setPIN(pin: String) {
         secureStateDao.insertState(SecureStateEntity("SAFE_PIN", pin))
     }
 
-    suspend fun getIsPinSet(): Boolean {
+    override suspend fun getIsPinSet(): Boolean {
         return getPIN() != null
     }
 
     // Chat Message DB Logic
-    suspend fun insertMessage(messageText: String, sender: String, isThinking: Boolean = false, thinkingProcess: String? = null) {
+    override suspend fun insertMessage(messageText: String, sender: String, isThinking: Boolean, thinkingProcess: String?) {
         chatDao.insertMessage(
             ChatMessageEntity(
                 messageText = messageText,
@@ -231,16 +266,16 @@ class AppRepository(private val db: AppDatabase) {
         )
     }
 
-    suspend fun clearChatHistory() {
+    override suspend fun clearChatHistory() {
         chatDao.clearHistory()
     }
 
     // Gemini API integration service
-    suspend fun callGemini(
+    override suspend fun callGemini(
         apiKey: String,
         prompt: String,
-        systemInstruction: String? = null,
-        enableThinkingMode: Boolean = false
+        systemInstruction: String?,
+        enableThinkingMode: Boolean
     ): Pair<String, String?> {
         // Evaluate rules:
         // Use gemini-2.5-pro if high thinking mode. Use gemini-2.0-flash for standard

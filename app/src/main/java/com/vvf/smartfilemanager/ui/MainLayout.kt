@@ -209,21 +209,26 @@ fun MainLayout(viewModel: SmartViewModel) {
 @Composable
 fun CleanScreen(viewModel: SmartViewModel) {
     val context = LocalContext.current
-    val files by viewModel.allLocalNonSafeFiles.collectAsStateWithLifecycle()
-    val junkList by viewModel.junkFiles.collectAsStateWithLifecycle()
-    val duplicatesList by viewModel.duplicateFiles.collectAsStateWithLifecycle()
+    val localNonSafeFilesTotalSize by viewModel.localNonSafeFilesTotalSize.collectAsStateWithLifecycle()
+    val junkFilesTotalSize by viewModel.junkFilesTotalSize.collectAsStateWithLifecycle()
+    val duplicateFilesTotalSize by viewModel.duplicateFilesTotalSize.collectAsStateWithLifecycle()
+
+    val localNonSafeFilesCount by viewModel.localNonSafeFilesCount.collectAsStateWithLifecycle()
+    val safeFilesCount by viewModel.safeFilesCount.collectAsStateWithLifecycle()
+    val duplicateFilesCount by viewModel.duplicateFilesCount.collectAsStateWithLifecycle()
     
     val duplicatesState by viewModel.duplicateScannerState.collectAsStateWithLifecycle()
     val duplicatesProgress by viewModel.duplicateScanProgress.collectAsStateWithLifecycle()
+    val scannedDuplicates by viewModel.scannedDuplicates.collectAsStateWithLifecycle()
     
     val cleanerState by viewModel.cleanerState.collectAsStateWithLifecycle()
     val cleanerProgress by viewModel.cleanerProgress.collectAsStateWithLifecycle()
     
-    val usedFilesSpace = files.sumOf { it.size }
-    val junkFilesSpace = junkList.sumOf { it.size }
+    val usedFilesSpace = localNonSafeFilesTotalSize
+    val junkFilesSpace = junkFilesTotalSize
     
     val totalLocalSpace = 120_000_000_000L // 120 GB
-    val usedSpace = usedFilesSpace + junkFilesSpace + duplicatesList.sumOf { it.size }
+    val usedSpace = usedFilesSpace + junkFilesSpace + duplicateFilesTotalSize
     
     LazyColumn(
         modifier = Modifier
@@ -497,9 +502,9 @@ fun CleanScreen(viewModel: SmartViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val dups = duplicatesList.filter { it.isDuplicate }
+                        val dupsCount = duplicateFilesCount
                         Text(
-                            text = if (dups.isNotEmpty()) "${dups.size} twin items (${viewModel.formatSize(dups.sumOf { it.size })})"
+                            text = if (dupsCount > 0) "$dupsCount twin items (${viewModel.formatSize(duplicateFilesTotalSize)})"
                                    else "Clean & Optimized",
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.bodyMedium,
@@ -584,9 +589,9 @@ fun CleanScreen(viewModel: SmartViewModel) {
                             .padding(10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        val liveFilesCount = files.size
-                        val liveSafeFilesCount = viewModel.allSafeFiles.collectAsStateWithLifecycle().value.size
-                        val liveDuplicatesCount = duplicatesList.size
+                        val liveFilesCount = localNonSafeFilesCount
+                        val liveSafeFilesCount = safeFilesCount
+                        val liveDuplicatesCount = duplicateFilesCount
 
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Local Files", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
@@ -763,7 +768,7 @@ fun CleanScreen(viewModel: SmartViewModel) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Looking for duplicate file bytes...", fontWeight = FontWeight.Medium)
                     } else if (duplicatesState == ScannerState.Finished) {
-                        val dups = duplicatesList.filter { it.isDuplicate }
+                        val dups = scannedDuplicates
                         if (dups.isEmpty()) {
                             Icon(Icons.Filled.Check, "Success", modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.tertiary)
                             Spacer(modifier = Modifier.height(12.dp))
@@ -866,7 +871,7 @@ fun CleanScreen(viewModel: SmartViewModel) {
 @Composable
 fun BrowseScreen(viewModel: SmartViewModel) {
     val context = LocalContext.current
-    val files by viewModel.allLocalNonSafeFiles.collectAsStateWithLifecycle()
+    val filteredFiles by viewModel.filteredLocalFiles.collectAsStateWithLifecycle()
     val searchQueries by viewModel.localSearchQuery.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedLocalFileIds.collectAsStateWithLifecycle()
     val isMultiSelect by viewModel.isMultiSelectMode.collectAsStateWithLifecycle()
@@ -882,24 +887,9 @@ fun BrowseScreen(viewModel: SmartViewModel) {
     val filteredRealFiles by viewModel.filteredRealFiles.collectAsStateWithLifecycle()
 
     var showSafeFolderDialog by remember { mutableStateOf(false) }
-    var selectedCategory by remember { mutableStateOf("ALL") }
+    val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     var browseSubTab by remember { mutableStateOf(0) } // 0: My Files, 1: Duplicates, 2: Simulated
     var realFileToDelete by remember { mutableStateOf<ScannedFile?>(null) }
-
-    val filteredFiles = remember(files, searchQueries, selectedCategory) {
-        files.filter { file ->
-            val matchesSearch = file.name.contains(searchQueries, ignoreCase = true)
-            val matchesCategory = when (selectedCategory) {
-                "ALL" -> true
-                "IMAGES" -> file.mimeType.startsWith("image/")
-                "VIDEOS" -> file.mimeType.startsWith("video/")
-                "AUDIO" -> file.mimeType.startsWith("audio/")
-                "DOCUMENTS" -> file.mimeType.contains("pdf") || file.mimeType.contains("sheet") || file.mimeType.contains("document") || file.mimeType.contains("text")
-                else -> true
-            }
-            matchesSearch && matchesCategory
-        }
-    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -1321,7 +1311,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
 
                                 HorizontalCategoryGrid(
                                     selectedCategory = selectedCategory,
-                                    onCategorySelect = { selectedCategory = it }
+                                    onCategorySelect = { viewModel.updateSelectedCategory(it) }
                                 )
                             }
 
@@ -1481,7 +1471,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                         }
 
                         IconButton(
-                            onClick = { viewModel.moveSelectedToSafe() },
+                            onClick = { viewModel.moveSelectedToSafe(selectedIds) { viewModel.clearLocalSelection() } },
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
@@ -3671,9 +3661,9 @@ fun GitHubTrackerScreen(viewModel: SmartViewModel) {
                                 .padding(10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            val liveFilesCount = viewModel.allLocalNonSafeFiles.collectAsStateWithLifecycle().value.size
-                            val liveSafeFilesCount = viewModel.allSafeFiles.collectAsStateWithLifecycle().value.size
-                            val liveDuplicatesCount = viewModel.duplicateFiles.collectAsStateWithLifecycle().value.size
+                            val liveFilesCount = viewModel.localNonSafeFilesCount.collectAsStateWithLifecycle().value
+                            val liveSafeFilesCount = viewModel.safeFilesCount.collectAsStateWithLifecycle().value
+                            val liveDuplicatesCount = viewModel.duplicateFilesCount.collectAsStateWithLifecycle().value
 
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Local Files", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
@@ -4527,10 +4517,11 @@ fun GitCodeWorkspace(viewModel: SmartViewModel) {
                         .weight(1f)
                         .fillMaxWidth()
                 ) {
-                    if (selectedRepoFile == null) {
+                    val repoFile = selectedRepoFile
+                    if (repoFile == null) {
                         GitWorkspaceEmptyState(repoPath = repoPath)
                     } else {
-                        GitWorkspaceCodeEditor(selectedFile = selectedRepoFile!!)
+                        GitWorkspaceCodeEditor(selectedFile = repoFile)
                     }
                 }
             }
@@ -4705,14 +4696,14 @@ fun GitCodeWorkspace(viewModel: SmartViewModel) {
     // --- Context Menu Dialog Implementations ---
 
     // 1. Rename Entry Dialog
-    if (showRenameDialogForFile != null) {
-        val node = showRenameDialogForFile!!
+    val renameNode = showRenameDialogForFile
+    if (renameNode != null) {
         AlertDialog(
             onDismissRequest = { showRenameDialogForFile = null },
             title = { Text("Rename Virtual Node", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Enter a new name for the virtual node at path '${node.path}':", style = MaterialTheme.typography.bodySmall)
+                    Text("Enter a new name for the virtual node at path '${renameNode.path}':", style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(
                         value = inputRenameValue,
                         onValueChange = { inputRenameValue = it },
@@ -4726,7 +4717,7 @@ fun GitCodeWorkspace(viewModel: SmartViewModel) {
                 Button(
                     onClick = {
                         if (inputRenameValue.isNotBlank()) {
-                            viewModel.renameRepoFile(node.id, inputRenameValue.trim())
+                            viewModel.renameRepoFile(renameNode.id, inputRenameValue.trim())
                         }
                         showRenameDialogForFile = null
                     },
@@ -4744,21 +4735,21 @@ fun GitCodeWorkspace(viewModel: SmartViewModel) {
     }
 
     // 2. Delete Confirmation Dialog
-    if (showDeleteDialogForFile != null) {
-        val node = showDeleteDialogForFile!!
+    val deleteNode = showDeleteDialogForFile
+    if (deleteNode != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialogForFile = null },
             title = { Text("Delete Node Entry?", fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    "Are you sure you want to delete '${node.path}' from the synchronized workspace?\n\nThis will remove it from the code exploration listing and clear its references.",
+                    "Are you sure you want to delete '${deleteNode.path}' from the synchronized workspace?\n\nThis will remove it from the code exploration listing and clear its references.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.deleteRepoFile(node.id)
+                        viewModel.deleteRepoFile(deleteNode.id)
                         showDeleteDialogForFile = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
@@ -4776,8 +4767,8 @@ fun GitCodeWorkspace(viewModel: SmartViewModel) {
     }
 
     // 3. View Info Dialog
-    if (showInfoDialogForFile != null) {
-        val node = showInfoDialogForFile!!
+    val infoNode = showInfoDialogForFile
+    if (infoNode != null) {
         AlertDialog(
             onDismissRequest = { showInfoDialogForFile = null },
             title = {
@@ -4790,20 +4781,20 @@ fun GitCodeWorkspace(viewModel: SmartViewModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Column {
                         Text("Node Name", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(node.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text(infoNode.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                     }
                     Column {
                         Text("Full Sync Path", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(node.path, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                        Text(infoNode.path, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
                     }
                     Column {
                         Text("Node Classification", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(if (node.isDirectory) "Directory Folder (Branch)" else "Source File (Blob)", style = MaterialTheme.typography.bodyMedium)
+                        Text(if (infoNode.isDirectory) "Directory Folder (Branch)" else "Source File (Blob)", style = MaterialTheme.typography.bodyMedium)
                     }
-                    if (!node.isDirectory) {
+                    if (!infoNode.isDirectory) {
                         Column {
                             Text("Simulated Binary Size", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${node.size} bytes (${String.format("%.2f", node.size / 1024.0)} KB)", style = MaterialTheme.typography.bodyMedium)
+                            Text("${infoNode.size} bytes (${String.format("%.2f", infoNode.size / 1024.0)} KB)", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                     Column {

@@ -2,8 +2,19 @@ package com.vvf.smartfilemanager.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.Index
 
-@Entity(tableName = "files")
+@Entity(
+    tableName = "files",
+    indices = [
+        Index(value = ["isLocal", "isSafe", "lastModified"]),
+        Index(value = ["isLocal", "isSafe", "mimeType", "lastModified"]),
+        Index(value = ["isDuplicate", "isLocal", "lastModified"]),
+        Index(value = ["isJunk", "isLocal", "lastModified"]),
+        Index(value = ["name", "size"]),
+        Index(value = ["cloudAccountEmail"])
+    ]
+)
 data class FileEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
