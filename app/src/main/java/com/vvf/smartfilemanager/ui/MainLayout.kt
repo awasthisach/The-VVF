@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -2087,7 +2088,7 @@ fun PinKeyboardDialer(
                                 .testTag("pin_dial_${char.lowercase()}")
                         ) {
                             if (char == "CLEAR") {
-                                Icon(Icons.Filled.Backspace, "Backspace")
+                                Icon(Icons.AutoMirrored.Filled.Backspace, "Backspace")
                             } else {
                                 Text(char, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                             }
@@ -2233,7 +2234,7 @@ fun CloudManagerScreen(viewModel: SmartViewModel) {
                                 if (accounts.size > 1) {
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Icon(
-                                        imageVector = Icons.Filled.Logout,
+                                        imageVector = Icons.AutoMirrored.Filled.Logout,
                                         contentDescription = "Logout virtual account",
                                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
                                         modifier = Modifier
@@ -2864,7 +2865,7 @@ fun AiAssistantScreen(viewModel: SmartViewModel) {
                         .testTag("send_chat_message_btn")
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.Send,
+                        imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send Message",
                         modifier = Modifier.size(20.dp)
                     )
@@ -3854,7 +3855,7 @@ fun GitHubTrackerScreen(viewModel: SmartViewModel) {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.Filled.TrendingUp, "Productivity Trend", tint = Color(0xFF0EA5E9))
+                                Icon(Icons.AutoMirrored.Filled.TrendingUp, "Productivity Trend", tint = Color(0xFF0EA5E9))
                                 Text(
                                     "Commit Activity (Last 30 Days)",
                                     fontWeight = FontWeight.Bold,
@@ -4172,7 +4173,7 @@ fun GitHubTrackerScreen(viewModel: SmartViewModel) {
                                     verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
                                     Icon(
-                                        Icons.Filled.Comment,
+                                        Icons.AutoMirrored.Filled.Comment,
                                         "Comments",
                                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                                         modifier = Modifier.size(16.dp)
@@ -4588,7 +4589,7 @@ fun GitCodeWorkspace(viewModel: SmartViewModel) {
                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                 ) {
                     Box {
-                        Icon(Icons.Filled.Chat, "Conversational AI")
+                        Icon(Icons.AutoMirrored.Filled.Chat, "Conversational AI")
                         if (repoChatHistory.size > 1) {
                             Badge(modifier = Modifier.align(Alignment.TopEnd)) { Text("${repoChatHistory.size - 1}") }
                         }
@@ -4887,7 +4888,7 @@ fun GitFileExplorerItemRow(
         // Expand/Collapse Chevron for directories
         if (file.isDirectory) {
             Icon(
-                imageVector = if (isExpanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
+                imageVector = if (isExpanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = if (isExpanded) "Collapse" else "Expand",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier
@@ -5078,7 +5079,7 @@ fun GitWorkspaceToolbar(
                             modifier = Modifier.size(32.dp).testTag("action_toggle_chat_panel")
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Chat,
+                                imageVector = Icons.AutoMirrored.Filled.Chat,
                                 contentDescription = "Toggle Gemini conversational bar",
                                 tint = if (isChatPanelVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp)
@@ -5416,7 +5417,7 @@ fun GitChatPanel(
                             modifier = Modifier.testTag("chat_repo_panel_send_btn")
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Send,
+                                imageVector = Icons.AutoMirrored.Filled.Send,
                                 contentDescription = "Send prompt",
                                 tint = if (rawInputText.isNotBlank() && !isGenerating) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
@@ -5940,7 +5941,7 @@ fun StorageCleanerPanel(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = { viewModel.setStorageCleanerActive(false) }) {
-                        Icon(Icons.Filled.ArrowBack, "Back", tint = MaterialTheme.colorScheme.onBackground)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = MaterialTheme.colorScheme.onBackground)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -6308,7 +6309,7 @@ fun AnimatedFileViewer(
                                             onClick = { rotationAngle += 90f },
                                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155))
                                         ) {
-                                            Icon(Icons.Filled.RotateRight, null, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.AutoMirrored.Filled.RotateRight, null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text("Rotate 90°", color = Color.White)
                                         }
@@ -6503,7 +6504,7 @@ fun AnimatedFileViewer(
                                         horizontalArrangement = Arrangement.spacedBy(32.dp)
                                     ) {
                                         IconButton(onClick = {}) {
-                                            Icon(Icons.Filled.ArrowBack, null, tint = Color.LightGray)
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.LightGray)
                                         }
                                         IconButton(
                                             onClick = { isPlaying = !isPlaying },
@@ -6519,7 +6520,7 @@ fun AnimatedFileViewer(
                                             )
                                         }
                                         IconButton(onClick = {}) {
-                                            Icon(Icons.Filled.ArrowForward, null, tint = Color.LightGray)
+                                            Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Color.LightGray)
                                         }
                                     }
                                 }
