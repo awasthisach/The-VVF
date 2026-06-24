@@ -33,6 +33,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.IntentSenderRequest
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -51,7 +55,35 @@ import com.vvf.smartfilemanager.viewmodel.*
 
 @Composable
 fun MainLayout(viewModel: SmartViewModel) {
+    val rootContext = LocalContext.current
+    val safTreeUri by viewModel.safTreeUri.collectAsStateWithLifecycle()
     var activeTab by remember { mutableStateOf(1) } // Default to Browse (1) matching Google Files landing page!
+
+    val pendingDeleteIntent by viewModel.pendingDeleteIntent.collectAsStateWithLifecycle()
+    val deleteLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            Toast.makeText(rootContext, "File deleted successfully!", Toast.LENGTH_SHORT).show()
+            viewModel.scanRealFiles()
+        } else {
+            Toast.makeText(rootContext, "Delete action cancelled", Toast.LENGTH_SHORT).show()
+        }
+        viewModel.clearPendingDeleteIntent()
+    }
+
+    LaunchedEffect(pendingDeleteIntent) {
+        pendingDeleteIntent?.let { pendingIntent ->
+            try {
+                deleteLauncher.launch(
+                    IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                )
+            } catch (e: Exception) {
+                Log.e("MainLayout", "Failed to launch delete PendingIntent", e)
+                viewModel.clearPendingDeleteIntent()
+            }
+        }
+    }
 
     // Insets-friendly Root Scaffold
     Scaffold(
@@ -871,6 +903,7 @@ fun CleanScreen(viewModel: SmartViewModel) {
 @Composable
 fun BrowseScreen(viewModel: SmartViewModel) {
     val context = LocalContext.current
+    val safTreeUri by viewModel.safTreeUri.collectAsStateWithLifecycle()
     val filteredFiles by viewModel.filteredLocalFiles.collectAsStateWithLifecycle()
     val searchQueries by viewModel.localSearchQuery.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedLocalFileIds.collectAsStateWithLifecycle()
@@ -890,6 +923,11 @@ fun BrowseScreen(viewModel: SmartViewModel) {
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     var browseSubTab by remember { mutableStateOf(0) } // 0: My Files, 1: Duplicates, 2: Simulated
     var realFileToDelete by remember { mutableStateOf<ScannedFile?>(null) }
+
+    var renameFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
+    var renameFileNameInput by remember { mutableStateOf("") }
+    var copyFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
+    var moveFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -957,6 +995,68 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                             shape = RoundedCornerShape(28.dp),
                             singleLine = true
                         )
+
+                        val openDocTreeLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.OpenDocumentTree()
+                        ) { uri ->
+                            uri?.let { viewModel.onSafDirectorySelected(context, it) }
+                        }
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                                .testTag("saf_control_card"),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (safTreeUri != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+                                else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f)
+                            ),
+                            border = BorderStroke(
+                                1.dp,
+                                if (safTreeUri != null) MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)
+                                else MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (safTreeUri != null) "✓ SAF Directory Connected" else "⚠ SAF Directory Required",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = if (safTreeUri != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = if (safTreeUri != null) {
+                                            "Active SAF Uri: ...${safTreeUri?.takeLast(35)}"
+                                        } else {
+                                            "Grant folder permission to execute real Rename, Copy, Move & Delete safely."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Button(
+                                    onClick = { openDocTreeLauncher.launch(null) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (safTreeUri != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.FolderOpen,
+                                        contentDescription = "SAF Folder",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (safTreeUri != null) "Change" else "Grant")
+                                }
+                            }
+                        }
 
                         // Scan section
                         Row(
@@ -1096,6 +1196,49 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                                             fontWeight = FontWeight.Bold
                                                         )
                                                     }
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            var showMenu by remember { mutableStateOf(false) }
+                                            Box {
+                                                IconButton(onClick = { showMenu = true }) {
+                                                    Icon(Icons.Filled.MoreVert, contentDescription = "Options")
+                                                }
+                                                DropdownMenu(
+                                                    expanded = showMenu,
+                                                    onDismissRequest = { showMenu = false }
+                                                ) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("✏ Rename") },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            renameFileTarget = file
+                                                            renameFileNameInput = file.name
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("📋 Copy to Connected Folder") },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            copyFileTarget = file
+                                                        },
+                                                        enabled = safTreeUri != null
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("➡️ Move to Connected Folder") },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            moveFileTarget = file
+                                                        },
+                                                        enabled = safTreeUri != null
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("❌ Delete") },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            realFileToDelete = file
+                                                        }
+                                                    )
                                                 }
                                             }
                                         }
@@ -1645,7 +1788,13 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            realFileToDelete?.let { viewModel.deleteRealFile(it) }
+                            realFileToDelete?.let {
+                                viewModel.deletePhysicalFile(context, it) { success ->
+                                    if (success) {
+                                        Toast.makeText(context, "File deleted successfully", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
                             realFileToDelete = null
                         }
                     ) {
@@ -1654,6 +1803,126 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                 },
                 dismissButton = {
                     TextButton(onClick = { realFileToDelete = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Rename Dialog
+        if (renameFileTarget != null) {
+            AlertDialog(
+                onDismissRequest = { renameFileTarget = null },
+                title = { Text("Rename File") },
+                text = {
+                    Column {
+                        Text("Enter new name for '${renameFileTarget?.name}':")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = renameFileNameInput,
+                            onValueChange = { renameFileNameInput = it },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            renameFileTarget?.let { file ->
+                                viewModel.renamePhysicalFile(context, file, renameFileNameInput) { success ->
+                                    if (success) {
+                                        Toast.makeText(context, "File renamed successfully!", Toast.LENGTH_SHORT).show()
+                                        viewModel.scanRealFiles()
+                                    } else {
+                                        Toast.makeText(context, "Rename failed. Ensure SAF folder permissions are active.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                            renameFileTarget = null
+                        }
+                    ) {
+                        Text("Rename")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { renameFileTarget = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Copy Dialog
+        if (copyFileTarget != null) {
+            val safUri = safTreeUri
+            AlertDialog(
+                onDismissRequest = { copyFileTarget = null },
+                title = { Text("Copy File") },
+                text = {
+                    Text("Copy '${copyFileTarget?.name}' to the currently connected SAF folder?\n\nFolder: ...${safUri?.takeLast(35)}")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            copyFileTarget?.let { file: ScannedFile ->
+                                safUri?.let { dest: String ->
+                                    viewModel.copyPhysicalFile(context, file, dest) { success: Boolean ->
+                                        if (success) {
+                                            Toast.makeText(context, "File copied successfully!", Toast.LENGTH_SHORT).show()
+                                            viewModel.scanRealFiles()
+                                        } else {
+                                            Toast.makeText(context, "Copy failed.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
+                            copyFileTarget = null
+                        }
+                    ) {
+                        Text("Copy")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { copyFileTarget = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Move Dialog
+        if (moveFileTarget != null) {
+            val safUri = safTreeUri
+            AlertDialog(
+                onDismissRequest = { moveFileTarget = null },
+                title = { Text("Move File") },
+                text = {
+                    Text("Move '${moveFileTarget?.name}' to the currently connected SAF folder?\nThis will copy the file to the active folder and delete the original.\n\nFolder: ...${safUri?.takeLast(35)}")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            moveFileTarget?.let { file: ScannedFile ->
+                                safUri?.let { dest: String ->
+                                    viewModel.movePhysicalFile(context, file, dest) { success: Boolean ->
+                                        if (success) {
+                                            Toast.makeText(context, "File moved successfully!", Toast.LENGTH_SHORT).show()
+                                            viewModel.scanRealFiles()
+                                        } else {
+                                            Toast.makeText(context, "Move failed.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
+                            moveFileTarget = null
+                        }
+                    ) {
+                        Text("Move")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { moveFileTarget = null }) {
                         Text("Cancel")
                     }
                 }

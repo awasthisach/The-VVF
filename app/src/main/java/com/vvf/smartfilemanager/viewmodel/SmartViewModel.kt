@@ -3,6 +3,8 @@ package com.vvf.smartfilemanager.viewmodel
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import android.app.PendingIntent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vvf.smartfilemanager.data.*
@@ -123,6 +125,8 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val realScanStatusMessage: StateFlow<String> = fileScannerViewModel.realScanStatusMessage
     val realFileSearchQuery: StateFlow<String> = fileScannerViewModel.realFileSearchQuery
     val filteredRealFiles: StateFlow<List<ScannedFile>> = fileScannerViewModel.filteredRealFiles
+    val safTreeUri: StateFlow<String?> = fileScannerViewModel.safTreeUri
+    val pendingDeleteIntent: StateFlow<PendingIntent?> = fileScannerViewModel.pendingDeleteIntent
     val storageSelectedFileIds: StateFlow<Set<Long>> = fileScannerViewModel.storageSelectedFileIds
     val isStorageScanning: StateFlow<Boolean> = fileScannerViewModel.isStorageScanning
     val storageScanProgress: StateFlow<Float> = fileScannerViewModel.storageScanProgress
@@ -147,6 +151,13 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     fun updateRealFileSearchQuery(query: String) = fileScannerViewModel.updateRealFileSearchQuery(query)
     fun addLocalSimulatedFile(name: String, size: Long, mimeType: String, path: String) = fileScannerViewModel.addLocalSimulatedFile(name, size, mimeType, path)
     fun deleteRealFile(file: ScannedFile) = fileScannerViewModel.deleteRealFile(file)
+    fun onSafDirectorySelected(context: Context, uri: Uri) = fileScannerViewModel.onSafDirectorySelected(context, uri)
+    fun scanSafFiles(context: Context) = fileScannerViewModel.scanSafFiles(context)
+    fun clearPendingDeleteIntent() = fileScannerViewModel.clearPendingDeleteIntent()
+    fun renamePhysicalFile(context: Context, file: ScannedFile, newName: String, onComplete: (Boolean) -> Unit) = fileScannerViewModel.renamePhysicalFile(context, file, newName, onComplete)
+    fun copyPhysicalFile(context: Context, source: ScannedFile, destinationFolderUriString: String, onComplete: (Boolean) -> Unit) = fileScannerViewModel.copyPhysicalFile(context, source, destinationFolderUriString, onComplete)
+    fun movePhysicalFile(context: Context, source: ScannedFile, destinationFolderUriString: String, onComplete: (Boolean) -> Unit) = fileScannerViewModel.movePhysicalFile(context, source, destinationFolderUriString, onComplete)
+    fun deletePhysicalFile(context: Context, file: ScannedFile, onComplete: (Boolean) -> Unit) = fileScannerViewModel.deletePhysicalFile(context, file, onComplete)
     fun deleteRealDuplicates(keepFirst: Boolean = true) = fileScannerViewModel.deleteRealDuplicates(keepFirst)
     fun toggleLocalFileSelection(id: Long) = fileScannerViewModel.toggleLocalFileSelection(id)
     fun selectAllLocalFiles(filesList: List<FileEntity>) = fileScannerViewModel.selectAllLocalFiles(filesList)

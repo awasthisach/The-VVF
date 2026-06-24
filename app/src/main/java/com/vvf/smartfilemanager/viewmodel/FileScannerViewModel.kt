@@ -2,6 +2,14 @@ package com.vvf.smartfilemanager.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.ContentValues
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import androidx.documentfile.provider.DocumentFile
+import android.app.PendingIntent
+import kotlinx.coroutines.withContext
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,6 +37,21 @@ class FileScannerViewModel(
 ) : AndroidViewModel(application) {
 
     private val workManager = WorkManager.getInstance(application)
+
+    // SAF Tree Uri state and reboot persistence
+    private val _safTreeUri = MutableStateFlow<String?>(null)
+    val safTreeUri: StateFlow<String?> = _safTreeUri.asStateFlow()
+
+    private val _pendingDeleteIntent = MutableStateFlow<PendingIntent?>(null)
+    val pendingDeleteIntent: StateFlow<PendingIntent?> = _pendingDeleteIntent.asStateFlow()
+
+    init {
+        val prefs = application.getSharedPreferences("smart_file_manager_prefs", Context.MODE_PRIVATE)
+        _safTreeUri.value = prefs.getString("saf_tree_uri", null)
+        _safTreeUri.value?.let {
+            scanSafFiles(application)
+        }
+    }
 
     // --- Local Files ---
     val allLocalNonSafeFiles: StateFlow<List<FileEntity>> = repository.allLocalNonSafeFiles
@@ -258,6 +281,12 @@ class FileScannerViewModel(
             _realScanProgress.value = 0.5f
             delay(200)
             repository.scanAndSaveRealFiles(appContext)
+            try {
+                val scanned = MediaStoreScanner(appContext).scanAllFiles()
+                _realFiles.value = scanned
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Error scanning real files", e)
+            }
             _realScanStatusMessage.value = "Finalizing secure file structures indexing..."
             _realScanProgress.value = 0.9f
             delay(100)
@@ -275,6 +304,12 @@ class FileScannerViewModel(
             _isScanningRealFiles.value = true
             _realScanProgress.value = 0f
             _realScanStatusMessage.value = "Locating files..."
+            try {
+                val scanned = MediaStoreScanner(getApplication()).scanAllFiles()
+                _realFiles.value = scanned
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Error scanning files in scanRealFiles", e)
+            }
             while (_realScanProgress.value < 1.0f) {
                 delay(100)
                 _realScanProgress.value = minOf(1.0f, _realScanProgress.value + 0.15f)
@@ -284,14 +319,240 @@ class FileScannerViewModel(
         }
     }
 
-    fun deleteRealFile(file: ScannedFile) {
-        viewModelScope.launch {
-            val f = File(file.path)
-            if (f.exists()) {
-                f.delete()
+    fun onSafDirectorySelected(context: Context, uri: Uri) {
+        try {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            val prefs = context.getSharedPreferences("smart_file_manager_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("saf_tree_uri", uri.toString()).apply()
+            _safTreeUri.value = uri.toString()
+            scanSafFiles(context)
+        } catch (e: Exception) {
+            Log.e("FileScannerViewModel", "Failed to take persistable URI permission", e)
+        }
+    }
+
+    fun scanSafFiles(context: Context) {
+        val uriString = _safTreeUri.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val treeUri = Uri.parse(uriString)
+                val documentFile = DocumentFile.fromTreeUri(context, treeUri)
+                if (documentFile != null && documentFile.isDirectory) {
+                    val scannedList = mutableListOf<ScannedFile>()
+                    traverseDocumentFile(documentFile, scannedList)
+                    _realFiles.value = scannedList
+                    repository.insertFiles(scannedList.map { scanned ->
+                        FileEntity(
+                            name = scanned.name,
+                            path = scanned.path,
+                            size = scanned.size,
+                            mimeType = scanned.mimeType,
+                            isLocal = true,
+                            isSafe = false,
+                            lastModified = System.currentTimeMillis()
+                        )
+                    })
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Error scanning SAF folder files", e)
             }
-            _realFiles.value = _realFiles.value.filter { it.path != file.path }
-            Log.d("FileScannerViewModel", "Deleted real file at path: ${file.path}")
+        }
+    }
+
+    private fun traverseDocumentFile(dir: DocumentFile, outList: MutableList<ScannedFile>) {
+        try {
+            for (file in dir.listFiles()) {
+                if (file.isFile) {
+                    outList.add(
+                        ScannedFile(
+                            name = file.name ?: "Unknown",
+                            path = file.uri.toString(),
+                            size = file.length(),
+                            mimeType = file.type ?: "application/octet-stream",
+                            uri = file.uri
+                        )
+                    )
+                } else if (file.isDirectory) {
+                    traverseDocumentFile(file, outList)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("FileScannerViewModel", "Failed to traverse DocumentFile", e)
+        }
+    }
+
+    fun clearPendingDeleteIntent() {
+        _pendingDeleteIntent.value = null
+    }
+
+    fun renamePhysicalFile(context: Context, file: ScannedFile, newName: String, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var success = false
+            try {
+                val uri = file.uri
+                if (uri.scheme == "content" && uri.authority?.contains("media") == true) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val values = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
+                        }
+                        val rowsUpdated = context.contentResolver.update(uri, values, null, null)
+                        success = rowsUpdated > 0
+                    } else {
+                        val f = File(file.path)
+                        if (f.exists()) {
+                            val destination = File(f.parentFile, newName)
+                            success = f.renameTo(destination)
+                        }
+                    }
+                } else if (uri.scheme == "content") {
+                    val documentFile = DocumentFile.fromSingleUri(context, uri)
+                    if (documentFile != null && documentFile.exists()) {
+                        success = documentFile.renameTo(newName)
+                    }
+                } else {
+                    val f = File(file.path)
+                    if (f.exists()) {
+                        val destination = File(f.parentFile, newName)
+                        success = f.renameTo(destination)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Failed to rename physical file", e)
+            }
+            if (success) {
+                _safTreeUri.value?.let { scanSafFiles(context) }
+                _realFiles.value = _realFiles.value.map {
+                    if (it.path == file.path) it.copy(name = newName) else it
+                }
+            }
+            withContext(Dispatchers.Main) {
+                onComplete(success)
+            }
+        }
+    }
+
+    fun copyPhysicalFile(context: Context, source: ScannedFile, destinationFolderUriString: String, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var success = false
+            try {
+                val contentResolver = context.contentResolver
+                val sourceUri = source.uri
+                val destTreeUri = Uri.parse(destinationFolderUriString)
+                val parentDir = DocumentFile.fromTreeUri(context, destTreeUri)
+                if (parentDir != null && parentDir.isDirectory) {
+                    val newFile = parentDir.createFile(source.mimeType, source.name)
+                    if (newFile != null) {
+                        contentResolver.openInputStream(sourceUri)?.use { input ->
+                            contentResolver.openOutputStream(newFile.uri)?.use { output ->
+                                input.copyTo(output)
+                                success = true
+                            }
+                        }
+                    }
+                } else {
+                    val f = File(source.path)
+                    if (f.exists()) {
+                        val destFile = File(destinationFolderUriString, source.name)
+                        f.inputStream().use { input ->
+                            destFile.outputStream().use { output ->
+                                input.copyTo(output)
+                                success = true
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Failed to copy physical file", e)
+            }
+            if (success) {
+                _safTreeUri.value?.let { scanSafFiles(context) }
+            }
+            withContext(Dispatchers.Main) {
+                onComplete(success)
+            }
+        }
+    }
+
+    fun movePhysicalFile(context: Context, source: ScannedFile, destinationFolderUriString: String, onComplete: (Boolean) -> Unit) {
+        copyPhysicalFile(context, source, destinationFolderUriString) { copySuccess ->
+            if (copySuccess) {
+                deletePhysicalFileForMove(context, source) { deleteSuccess ->
+                    onComplete(deleteSuccess)
+                }
+            } else {
+                onComplete(false)
+            }
+        }
+    }
+
+    private fun deletePhysicalFileForMove(context: Context, file: ScannedFile, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var success = false
+            try {
+                val uri = file.uri
+                if (uri.scheme == "content" && uri.authority?.contains("media") == true) {
+                    val rowsDeleted = context.contentResolver.delete(uri, null, null)
+                    success = rowsDeleted > 0
+                } else if (uri.scheme == "content") {
+                    val documentFile = DocumentFile.fromSingleUri(context, uri)
+                    if (documentFile != null && documentFile.exists()) {
+                        success = documentFile.delete()
+                    }
+                } else {
+                    val f = File(file.path)
+                    if (f.exists()) {
+                        success = f.delete()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Failed to delete file for move", e)
+            }
+            withContext(Dispatchers.Main) {
+                onComplete(success)
+            }
+        }
+    }
+
+    fun deleteRealFile(file: ScannedFile) {
+        deletePhysicalFile(getApplication(), file)
+    }
+
+    fun deletePhysicalFile(context: Context, file: ScannedFile, onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var success = false
+            try {
+                val uri = file.uri
+                if (uri.scheme == "content" && uri.authority?.contains("media") == true) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, listOf(uri))
+                        _pendingDeleteIntent.value = pendingIntent
+                        success = false
+                    } else {
+                        val rowsDeleted = context.contentResolver.delete(uri, null, null)
+                        success = rowsDeleted > 0
+                    }
+                } else if (uri.scheme == "content") {
+                    val documentFile = DocumentFile.fromSingleUri(context, uri)
+                    if (documentFile != null && documentFile.exists()) {
+                        success = documentFile.delete()
+                    }
+                } else {
+                    val f = File(file.path)
+                    if (f.exists()) {
+                        success = f.delete()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Failed to delete physical file", e)
+            }
+            if (success) {
+                _realFiles.value = _realFiles.value.filter { it.path != file.path }
+                _safTreeUri.value?.let { scanSafFiles(context) }
+            }
+            withContext(Dispatchers.Main) {
+                onComplete(success)
+            }
         }
     }
 

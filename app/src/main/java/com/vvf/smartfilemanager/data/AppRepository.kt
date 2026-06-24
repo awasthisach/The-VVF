@@ -268,6 +268,13 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
         chatDao.clearHistory()
     }
 
+    // Secure pluggable AI Service Provider
+    private var aiServiceProvider: IAiServiceProvider = DirectGeminiServiceProvider()
+
+    fun setAiServiceProvider(provider: IAiServiceProvider) {
+        aiServiceProvider = provider
+    }
+
     // Gemini API integration service
     override suspend fun callGemini(
         apiKey: String,
@@ -275,46 +282,17 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
         systemInstruction: String?,
         enableThinkingMode: Boolean
     ): Pair<String, String?> {
-        // Evaluate rules:
-        // Use gemini-2.5-pro if high thinking mode. Use gemini-2.0-flash for standard
-        val modelName = if (enableThinkingMode) "gemini-2.5-pro" else "gemini-2.0-flash"
-        
-        val content = Content(parts = listOf(Part(text = prompt)))
-        val sysInstructionContent = systemInstruction?.let { Content(parts = listOf(Part(text = it))) }
-        
-        val generationConfig = if (enableThinkingMode) {
-            // High thinking configuration requested: set thinkingBudget = 8192
-            GenerationConfig(thinkingConfig = ThinkingConfig(thinkingBudget = 8192))
-        } else {
-            GenerationConfig(temperature = 0.5f)
-        }
-
-        val request = GenerateContentRequest(
-            contents = listOf(content),
-            generationConfig = generationConfig,
-            systemInstruction = sysInstructionContent
-        )
-
         try {
-            Log.d("AppRepository", "Calling Gemini with API Key length: ${apiKey.length}, model: $modelName")
-            val response = RetrofitClient.service.generateContent(
-                model = modelName,
-                apiKey = apiKey,
-                request = request
+            // Secure delegation via the abstraction layer to prevent client exposure
+            return aiServiceProvider.generateContent(
+                prompt = prompt,
+                systemInstruction = systemInstruction,
+                enableThinkingMode = enableThinkingMode,
+                apiKey = apiKey
             )
-            val candidates = response.candidates
-            val responseText = candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text 
-                ?: "Received no text candidate from Gemini API."
-            
-            // For pro-thinking visual simulation, we can produce thought logs alongside the reply text
-            val thoughtOutput = if (enableThinkingMode) {
-                "• Analyzed directory structures and semantic metadata.\n• Evaluated security clearance criteria.\n• Formulated response recommendations."
-            } else null
-
-            return Pair(responseText, thoughtOutput)
         } catch (e: Exception) {
-            Log.e("AppRepository", "Error calling Gemini: ", e)
-            return Pair("Failed to contact Gemini: ${e.localizedMessage ?: e.message}. Ensure your API key is correctly active and configured.", null)
+            Log.e("AppRepository", "Error calling AI provider: ", e)
+            return Pair("Failed via provider delegation: ${e.localizedMessage ?: e.message}", null)
         }
     }
 }
