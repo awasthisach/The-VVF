@@ -8,7 +8,7 @@ import android.util.Log
 
 class MediaStoreScanner(private val context: Context) {
 
-    fun scanAllFilesPaged(chunkSize: Int = 1000, onChunkScanned: (List<ScannedFile>) -> Unit) {
+    suspend fun scanAllFilesPaged(chunkSize: Int = 1000, onChunkScanned: suspend (List<ScannedFile>) -> Unit) {
         val filesList = mutableListOf<ScannedFile>()
         val contentResolver = context.contentResolver
 
