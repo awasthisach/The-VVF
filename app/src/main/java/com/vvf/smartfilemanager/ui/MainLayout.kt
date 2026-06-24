@@ -861,10 +861,7 @@ fun CleanScreen(viewModel: SmartViewModel) {
 
 // ==========================================
 // SCREEN 2: GOOGLE FILES BROWSE SCREEN
-// ==========================================
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun BrowseScreen(viewModel: SmartViewModel) {
+/fun BrowseScreen(viewModel: SmartViewModel) {
     val context = LocalContext.current
     val files by viewModel.allLocalNonSafeFiles.collectAsStateWithLifecycle()
     val searchQueries by viewModel.localSearchQuery.collectAsStateWithLifecycle()
@@ -872,8 +869,19 @@ fun BrowseScreen(viewModel: SmartViewModel) {
     val isMultiSelect by viewModel.isMultiSelectMode.collectAsStateWithLifecycle()
     val safeState by viewModel.safeFolderState.collectAsStateWithLifecycle()
 
+    // Real file states
+    val realFiles by viewModel.realFiles.collectAsStateWithLifecycle()
+    val realDuplicates by viewModel.realDuplicates.collectAsStateWithLifecycle()
+    val isScanningRealFiles by viewModel.isScanningRealFiles.collectAsStateWithLifecycle()
+    val realScanProgress by viewModel.realScanProgress.collectAsStateWithLifecycle()
+    val realScanStatusMessage by viewModel.realScanStatusMessage.collectAsStateWithLifecycle()
+    val realFileSearchQuery by viewModel.realFileSearchQuery.collectAsStateWithLifecycle()
+    val filteredRealFiles by viewModel.filteredRealFiles.collectAsStateWithLifecycle()
+
     var showSafeFolderDialog by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf("ALL") }
+    var browseSubTab by remember { mutableStateOf(0) } // 0: My Files, 1: Duplicates, 2: Simulated
+    var realFileToDelete by remember { mutableStateOf<ScannedFile?>(null) }
 
     val filteredFiles = remember(files, searchQueries, selectedCategory) {
         files.filter { file ->
@@ -893,178 +901,540 @@ fun BrowseScreen(viewModel: SmartViewModel) {
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             
-            // Search Bar matching Google Files aesthetic
-            Box(
+            // Header Row
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                MaterialTheme.colorScheme.background
-                            )
-                        )
-                    )
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
-                    value = searchQueries,
-                    onValueChange = { viewModel.updateLocalSearchQuery(it) },
-                    placeholder = { Text("Search your local files...") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary) },
-                    trailingIcon = {
-                        IconButton(onClick = { showSafeFolderDialog = true }) {
-                            Icon(
-                                imageVector = if (safeState is SafeFolderState.Unlocked) Icons.Filled.FolderSpecial else Icons.Filled.Lock,
-                                contentDescription = "Safe Vault",
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("local_search_input"),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-                    ),
-                    singleLine = true
+                Text(
+                    text = "Browse Storage | फ़ाइलें",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                IconButton(onClick = { showSafeFolderDialog = true }) {
+                    Icon(
+                        imageVector = if (safeState is SafeFolderState.Unlocked) Icons.Filled.FolderSpecial else Icons.Filled.Lock,
+                        contentDescription = "Safe Vault",
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+
+            // Sub-Tab Row
+            TabRow(
+                selectedTabIndex = browseSubTab,
+                modifier = Modifier.fillMaxWidth().testTag("browse_sub_tab_row")
+            ) {
+                Tab(
+                    selected = browseSubTab == 0,
+                    onClick = { browseSubTab = 0 },
+                    text = { Text("My Files") }
+                )
+                Tab(
+                    selected = browseSubTab == 1,
+                    onClick = { browseSubTab = 1 },
+                    text = { Text("Duplicates") }
+                )
+                Tab(
+                    selected = browseSubTab == 2,
+                    onClick = { browseSubTab = 2 },
+                    text = { Text("Simulated Files") }
                 )
             }
 
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(bottom = 80.dp)
-            ) {
-                item {
-                    Text(
-                        text = "Categories | श्रेणियाँ",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+            Spacer(modifier = Modifier.height(8.dp))
 
-                    HorizontalCategoryGrid(
-                        selectedCategory = selectedCategory,
-                        onCategorySelect = { selectedCategory = it }
-                    )
-                }
+            when (browseSubTab) {
+                0 -> {
+                    // MY FILES SUB-TAB
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Search bar
+                        OutlinedTextField(
+                            value = realFileSearchQuery,
+                            onValueChange = { viewModel.updateRealFileSearchQuery(it) },
+                            placeholder = { Text("Search real scanned files...") },
+                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            singleLine = true
+                        )
 
-                item {
-                    Text(
-                        text = "Collections | संग्रह",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .clickable { showSafeFolderDialog = true }
-                            .testTag("safe_folder_entrance_card"),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
+                        // Scan section
                         Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(16.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
+                            Text(
+                                text = "Scanned Storage",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(
+                                onClick = { viewModel.scanRealFiles() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Icon(Icons.Filled.Refresh, "Scan", modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Scan Now")
+                            }
+                        }
+
+                        // Scanning indicators
+                        if (isScanningRealFiles) {
+                            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                                LinearProgressIndicator(
+                                    progress = { realScanProgress },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = realScanStatusMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else if (realScanStatusMessage.isNotEmpty()) {
+                            Text(
+                                text = realScanStatusMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+
+                        if (filteredRealFiles.isEmpty() && !isScanningRealFiles) {
                             Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                modifier = Modifier.fillMaxSize().weight(1f),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = if (safeState is SafeFolderState.Unlocked) Icons.Filled.FolderSpecial else Icons.Filled.Lock,
-                                    contentDescription = "Safe Folder",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Filled.FolderOpen,
+                                        contentDescription = "Empty",
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(56.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text("No scanned real files found. Run a scan!", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                }
                             }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Safe Folder | सुरक्षित फ़ोल्डर",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                                Text(
-                                    text = if (safeState is SafeFolderState.Unlocked) "Accessible & Unlocked" else "Locked via secure 4-digit setup",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(bottom = 80.dp)
+                            ) {
+                                items(filteredRealFiles) { file ->
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                                            .combinedClickable(
+                                                onClick = {
+                                                    Toast.makeText(context, "Long-press to delete: ${file.name}", Toast.LENGTH_SHORT).show()
+                                                },
+                                                onLongClick = {
+                                                    realFileToDelete = file
+                                                }
+                                            ),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            val icon = when {
+                                                file.mimeType.startsWith("image/") -> Icons.Filled.Image
+                                                file.mimeType.startsWith("video/") -> Icons.Filled.Movie
+                                                file.mimeType.startsWith("audio/") -> Icons.Filled.MusicNote
+                                                else -> Icons.Filled.Description
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = file.name,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Text(
+                                                        text = viewModel.formatSize(file.size),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = file.mimeType.substringAfter("/").uppercase(),
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontSize = 9.sp,
+                                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            Icon(Icons.Filled.FolderSpecial, "Unlock", tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
                         }
                     }
                 }
+                1 -> {
+                    // DUPLICATES SUB-TAB
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Scan & Remove Duplicates",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${realDuplicates.size} groups found",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { viewModel.scanRealFiles() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                                ) {
+                                    Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Find")
+                                }
+                                if (realDuplicates.isNotEmpty()) {
+                                    Button(
+                                        onClick = { viewModel.deleteRealDuplicates(keepFirst = true) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Icon(Icons.Filled.Delete, null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Delete All (Keep Newest)")
+                                    }
+                                }
+                            }
+                        }
 
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Internal Storage ($selectedCategory files)",
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                        )
-                        Text(
-                            text = "${filteredFiles.size} items",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        if (realDuplicates.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ContentCopy,
+                                        contentDescription = "No Duplicates",
+                                        tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(56.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "No duplicate sets scanned or found yet.",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(bottom = 80.dp)
+                            ) {
+                                realDuplicates.forEach { (key, group) ->
+                                    item {
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                        ) {
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = key.substringBeforeLast("_"),
+                                                        style = MaterialTheme.typography.titleSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Text(
+                                                        text = "${group.size} copies",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(start = 8.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = "Individual Size: ${viewModel.formatSize(group.firstOrNull()?.size ?: 0L)}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    items(group) { file ->
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 24.dp, vertical = 2.dp),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Description,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Column {
+                                                    Text(
+                                                        text = file.path,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = "Size: ${viewModel.formatSize(file.size)}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-
-                if (filteredFiles.isEmpty()) {
-                    item {
+                2 -> {
+                    // ORIGINAL SIMULATED FILES
+                    Column(modifier = Modifier.fillMaxSize()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 40.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Filled.Folder,
-                                    contentDescription = "Empty",
-                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                                    modifier = Modifier.size(56.dp)
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                            MaterialTheme.colorScheme.background
+                                        )
+                                    )
                                 )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("No local archives in this category.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                            }
-                        }
-                    }
-                } else {
-                    items(filteredFiles, key = { it.id }) { file ->
-                        val isSelected = selectedIds.contains(file.id)
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            LocalFileItemCard(
-                                file = file,
-                                isSelected = isSelected,
-                                onOpenFile = { viewModel.openFileInViewer(file) },
-                                onToggleSelect = { viewModel.toggleLocalFileSelection(file.id) },
-                                formatSize = { viewModel.formatSize(it) },
-                                formatDate = { viewModel.formatDate(it) }
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = searchQueries,
+                                onValueChange = { viewModel.updateLocalSearchQuery(it) },
+                                placeholder = { Text("Search your simulated files...") },
+                                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("local_search_input"),
+                                shape = RoundedCornerShape(28.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                                ),
+                                singleLine = true
                             )
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(bottom = 80.dp)
+                        ) {
+                            item {
+                                Text(
+                                    text = "Categories | श्रेणियाँ",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+
+                                HorizontalCategoryGrid(
+                                    selectedCategory = selectedCategory,
+                                    onCategorySelect = { selectedCategory = it }
+                                )
+                            }
+
+                            item {
+                                Text(
+                                    text = "Collections | संग्रह",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                                        .clickable { showSafeFolderDialog = true }
+                                        .testTag("safe_folder_entrance_card"),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(44.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (safeState is SafeFolderState.Unlocked) Icons.Filled.FolderSpecial else Icons.Filled.Lock,
+                                                contentDescription = "Safe Folder",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Safe Folder | सुरक्षित फ़ोल्डर",
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.bodyLarge
+                                            )
+                                            Text(
+                                                text = if (safeState is SafeFolderState.Unlocked) "Accessible & Unlocked" else "Locked via secure 4-digit setup",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                            )
+                                        }
+                                        Icon(Icons.Filled.FolderSpecial, "Unlock", tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+                                    }
+                                }
+                            }
+
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Internal Storage ($selectedCategory files)",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+                                    Text(
+                                        text = "${filteredFiles.size} items",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+
+                            if (filteredFiles.isEmpty()) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 40.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Folder,
+                                                contentDescription = "Empty",
+                                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                                modifier = Modifier.size(56.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Text("No local archives in this category.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
+                            } else {
+                                items(filteredFiles, key = { it.id }) { file ->
+                                    val isSelected = selectedIds.contains(file.id)
+                                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                        LocalFileItemCard(
+                                            file = file,
+                                            isSelected = isSelected,
+                                            onOpenFile = { viewModel.openFileInViewer(file) },
+                                            onToggleSelect = { viewModel.toggleLocalFileSelection(file.id) },
+                                            formatSize = { viewModel.formatSize(it) },
+                                            formatDate = { viewModel.formatDate(it) }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1072,7 +1442,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
         }
 
         AnimatedVisibility(
-            visible = isMultiSelect,
+            visible = isMultiSelect && browseSubTab == 2,
             enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(250)) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(250)) + fadeOut(),
             modifier = Modifier
@@ -1143,7 +1513,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
         // Speed dial menu choices
         var showFabMenu by remember { mutableStateOf(false) }
 
-        if (showFabMenu) {
+        if (showFabMenu && browseSubTab == 2) {
             // Semi-transparent backdrop to focus dial options
             Box(
                 modifier = Modifier
@@ -1256,18 +1626,44 @@ fun BrowseScreen(viewModel: SmartViewModel) {
         }
 
         // Floating Action Button to Import Simulated Files directly
-        FloatingActionButton(
-            onClick = { showFabMenu = !showFabMenu },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = 24.dp, end = 24.dp)
-                .testTag("import_file_fab"),
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ) {
-            Icon(
-                imageVector = if (showFabMenu) Icons.Filled.Close else Icons.Filled.Add,
-                contentDescription = "Expand Options"
+        if (browseSubTab == 2) {
+            FloatingActionButton(
+                onClick = { showFabMenu = !showFabMenu },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 24.dp, end = 24.dp)
+                    .testTag("import_file_fab"),
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ) {
+                Icon(
+                    imageVector = if (showFabMenu) Icons.Filled.Close else Icons.Filled.Add,
+                    contentDescription = "Expand Options"
+                )
+            }
+        }
+
+        // Real files delete confirmation dialog
+        if (realFileToDelete != null) {
+            AlertDialog(
+                onDismissRequest = { realFileToDelete = null },
+                title = { Text("Delete File?") },
+                text = { Text("Are you sure you want to permanently delete '${realFileToDelete?.name}' from your device storage? This cannot be undone.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            realFileToDelete?.let { viewModel.deleteRealFile(it) }
+                            realFileToDelete = null
+                        }
+                    ) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { realFileToDelete = null }) {
+                        Text("Cancel")
+                    }
+                }
             )
         }
 
@@ -1468,6 +1864,14 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}                             }
                             }
                         }
                     }

@@ -120,10 +120,10 @@ class AppRepository(private val db: AppDatabase) {
                     isDuplicate = false,
                     isJunk = true
                 ),
-                // Cloud Files for default active account (awasthi.sach@gmail.com)
+                // Cloud Files for default active account (user@example.com)
                 FileEntity(
                     name = "Resume_Awasthi_Sach.pdf",
-                    path = "GoogleDrive://awasthi.sach@gmail.com/Documents/Resume_Awasthi_Sach.pdf",
+                    path = "GoogleDrive://user@example.com/Documents/Resume_Awasthi_Sach.pdf",
                     size = 1842100,
                     lastModified = 1780990000000L,
                     mimeType = "application/pdf",
@@ -131,11 +131,11 @@ class AppRepository(private val db: AppDatabase) {
                     isSafe = false,
                     isDuplicate = false,
                     isJunk = false,
-                    cloudAccountEmail = "awasthi.sach@gmail.com"
+                    cloudAccountEmail = "user@example.com"
                 ),
                 FileEntity(
                     name = "Project_Proposal_Smart_Manager.gdoc",
-                    path = "GoogleDrive://awasthi.sach@gmail.com/Work/Project_Proposal_Smart_Manager.gdoc",
+                    path = "GoogleDrive://user@example.com/Work/Project_Proposal_Smart_Manager.gdoc",
                     size = 154200,
                     lastModified = 1781200000000L,
                     mimeType = "application/vnd.google-apps.document",
@@ -143,11 +143,11 @@ class AppRepository(private val db: AppDatabase) {
                     isSafe = false,
                     isDuplicate = false,
                     isJunk = false,
-                    cloudAccountEmail = "awasthi.sach@gmail.com"
+                    cloudAccountEmail = "user@example.com"
                 ),
                 FileEntity(
                     name = "Family_Reunion_2026.png",
-                    path = "GoogleDrive://awasthi.sach@gmail.com/Photos/Family_Reunion_2026.png",
+                    path = "GoogleDrive://user@example.com/Photos/Family_Reunion_2026.png",
                     size = 8410211,
                     lastModified = 1781400000000L,
                     mimeType = "image/png",
@@ -155,11 +155,11 @@ class AppRepository(private val db: AppDatabase) {
                     isSafe = false,
                     isDuplicate = false,
                     isJunk = false,
-                    cloudAccountEmail = "awasthi.sach@gmail.com"
+                    cloudAccountEmail = "user@example.com"
                 ),
                 FileEntity(
                     name = "Weekly_Sync_10_Meeting.mp4",
-                    path = "GoogleDrive://awasthi.sach@gmail.com/Videos/Weekly_Sync_10_Meeting.mp4",
+                    path = "GoogleDrive://user@example.com/Videos/Weekly_Sync_10_Meeting.mp4",
                     size = 89912400,
                     lastModified = 1781100000000L,
                     mimeType = "video/mp4",
@@ -167,7 +167,7 @@ class AppRepository(private val db: AppDatabase) {
                     isSafe = false,
                     isDuplicate = false,
                     isJunk = false,
-                    cloudAccountEmail = "awasthi.sach@gmail.com"
+                    cloudAccountEmail = "user@example.com"
                 )
             )
 

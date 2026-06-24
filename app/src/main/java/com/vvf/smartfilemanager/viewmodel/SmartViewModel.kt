@@ -6,6 +6,8 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vvf.smartfilemanager.data.*
+import com.vvf.smartfilemanager.data.MediaStoreScanner
+import com.vvf.smartfilemanager.data.ScannedFile
 import com.vvf.smartfilemanager.BuildConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -33,6 +35,33 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application.applicationContext
     private val database = AppDatabase.getDatabase(context)
     private val repository = AppRepository(database)
+
+    private val mediaScanner = MediaStoreScanner(application.applicationContext)
+
+    private val _realFiles = MutableStateFlow<List<ScannedFile>>(emptyList())
+    val realFiles: StateFlow<List<ScannedFile>> = _realFiles.asStateFlow()
+
+    private val _realDuplicates = MutableStateFlow<Map<String, List<ScannedFile>>>(emptyMap())
+    val realDuplicates: StateFlow<Map<String, List<ScannedFile>>> = _realDuplicates.asStateFlow()
+
+    private val _isScanningRealFiles = MutableStateFlow(false)
+    val isScanningRealFiles: StateFlow<Boolean> = _isScanningRealFiles.asStateFlow()
+
+    private val _realScanProgress = MutableStateFlow(0f)
+    val realScanProgress: StateFlow<Float> = _realScanProgress.asStateFlow()
+
+    private val _realScanStatusMessage = MutableStateFlow("")
+    val realScanStatusMessage: StateFlow<String> = _realScanStatusMessage.asStateFlow()
+
+    private val _realFileSearchQuery = MutableStateFlow("")
+    val realFileSearchQuery: StateFlow<String> = _realFileSearchQuery.asStateFlow()
+
+    val filteredRealFiles: StateFlow<List<ScannedFile>> = combine(
+        _realFiles, _realFileSearchQuery
+    ) { files, query ->
+        if (query.isBlank()) files
+        else files.filter { it.name.contains(query, ignoreCase = true) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val sharedPrefs = context.getSharedPreferences("smart_files_prefs", Context.MODE_PRIVATE)
 
@@ -121,7 +150,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val scannedDuplicates: StateFlow<List<FileEntity>> = allLocalNonSafeFiles
         .map { allFiles ->
             val duplicates = allFiles.filter { it.isDuplicate }
-            val nameSizeGroups = allFiles.groupBy { it.name + "_" + it.size }
+            val nameSizeGroups = allFiles.groupBy { Pair(it.name, it.size) }
             val matchDupes = nameSizeGroups.filter { it.value.size > 1 }.flatMap { it.value.drop(1) }
             (duplicates + matchDupes).distinctBy { it.id }
         }
@@ -161,11 +190,11 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
 
     // Google Cloud Sim States
     private val _connectedAccounts = MutableStateFlow(
-        listOf("awasthi.sach@gmail.com", "workspace.admin@corporation.com", "sac.personal@outlook.com")
+        listOf("user@example.com")
     )
     val connectedAccounts: StateFlow<List<String>> = _connectedAccounts.asStateFlow()
 
-    private val _activeAccountEmail = MutableStateFlow("awasthi.sach@gmail.com")
+    private val _activeAccountEmail = MutableStateFlow("user@example.com")
     val activeAccountEmail: StateFlow<String> = _activeAccountEmail.asStateFlow()
 
     val cloudFiles: StateFlow<List<FileEntity>> = _activeAccountEmail
@@ -328,6 +357,46 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateRealFileSearchQuery(q: String) { _realFileSearchQuery.value = q }
+
+    fun scanRealFiles() {
+        viewModelScope.launch {
+            _isScanningRealFiles.value = true
+            _realScanProgress.value = 0f
+            _realScanStatusMessage.value = "Scanning files..."
+            val allFiles = mediaScanner.scanAllFiles()
+            _realFiles.value = allFiles
+            _realScanProgress.value = 0.5f
+            _realScanStatusMessage.value = "Finding duplicates... (${allFiles.size} files found)"
+            val dupes = mediaScanner.findDuplicates(allFiles)
+            _realDuplicates.value = dupes
+            _realScanProgress.value = 1f
+            _realScanStatusMessage.value = "Done — ${allFiles.size} files, ${dupes.values.sumOf { it.size - 1 }} duplicates found"
+            _isScanningRealFiles.value = false
+        }
+    }
+
+    fun deleteRealFile(file: ScannedFile) {
+        viewModelScope.launch {
+            val success = mediaScanner.deleteFile(file.uri)
+            if (success) {
+                _realFiles.value = _realFiles.value.filter { it.uri != file.uri }
+                _realDuplicates.value = mediaScanner.findDuplicates(_realFiles.value)
+            }
+        }
+    }
+
+    fun deleteRealDuplicates(keepFirst: Boolean = true) {
+        viewModelScope.launch {
+            _realDuplicates.value.values.forEach { group ->
+                val toDelete = if (keepFirst) group.drop(1) else group.dropLast(1)
+                toDelete.forEach { file -> mediaScanner.deleteFile(file.uri) }
+            }
+            _realFiles.value = mediaScanner.scanAllFiles()
+            _realDuplicates.value = mediaScanner.findDuplicates(_realFiles.value)
+        }
+    }
+
     // --- Clean & Scan Actions ---
     fun runDuplicateScanner() {
         viewModelScope.launch {
@@ -335,7 +404,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
             _duplicateScanProgress.value = 0f
             while (_duplicateScanProgress.value < 1.0f) {
                 delay(120)
-                _duplicateScanProgress.value += 0.1f
+                _duplicateScanProgress.value = minOf(1.0f, _duplicateScanProgress.value + 0.1f)
             }
             _duplicateScanProgress.value = 1.0f
             _duplicateScannerState.value = ScannerState.Finished
@@ -362,7 +431,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
             _cleanerProgress.value = 0f
             while (_cleanerProgress.value < 1.0f) {
                 delay(80)
-                _cleanerProgress.value += 0.08f
+                _cleanerProgress.value = minOf(1.0f, _cleanerProgress.value + 0.08f)
             }
             _cleanerProgress.value = 1.0f
             _cleanerState.value = CleanerState.Finished
@@ -375,7 +444,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
             _cleanerProgress.value = 0f
             while (_cleanerProgress.value < 1.0f) {
                 delay(60)
-                _cleanerProgress.value += 0.1f
+                _cleanerProgress.value = minOf(1.0f, _cleanerProgress.value + 0.1f)
             }
             repository.cleanAllJunk()
             _cleanerState.value = CleanerState.Idle
@@ -417,7 +486,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
             _storageScanProgress.value = 0f
             while (_storageScanProgress.value < 1.0f) {
                 delay(100)
-                _storageScanProgress.value += 0.1f
+                _storageScanProgress.value = minOf(1.0f, _storageScanProgress.value + 0.1f)
             }
             _storageScanProgress.value = 1.0f
             _isStorageScanning.value = false
@@ -537,7 +606,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
                         _pinSetupStep.value = "ENTER_PIN"
                         _tempPinForSetup.value = ""
                     } else {
-                        _pinErrorMessage.value = "PINs do note match. Attempt re-entry."
+                        _pinErrorMessage.value = "PINs do not match. Please try again."
                         _pinSetupStep.value = "ENTER_PIN"
                         _tempPinForSetup.value = ""
                     }

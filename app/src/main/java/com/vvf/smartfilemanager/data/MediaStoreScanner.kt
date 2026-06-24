@@ -1,73 +1,59 @@
 package com.vvf.smartfilemanager.data
 
+import android.content.ContentUris
 import android.content.Context
+import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 
-object MediaStoreScanner {
+class MediaStoreScanner(private val context: Context) {
 
-    fun scanLocalFiles(context: Context): List<FileEntity> {
-        val filesList = mutableListOf<FileEntity>()
+    fun scanAllFiles(): List<ScannedFile> {
+        val filesList = mutableListOf<ScannedFile>()
         val contentResolver = context.contentResolver
 
         // Projection for media queries
         val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.DATA,
             MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.MIME_TYPE
         )
 
-        // Uris to query
         val uris = listOf(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI to "image",
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI to "video",
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI to "audio",
-            MediaStore.Files.getContentUri("external") to "file"
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI to "audio"
         )
 
         for ((uri, type) in uris) {
             try {
-                // If it's MediaStore.Files, filter by non-media to avoid duplicates
-                val selection = if (type == "file") {
-                    "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ${MediaStore.Files.FileColumns.MEDIA_TYPE_NONE}"
-                } else {
-                    null
-                }
-
-                contentResolver.query(uri, projection, selection, null, null)?.use { cursor ->
+                contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                    val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
                     val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
                     val dataIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
                     val sizeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
-                    val dateModifiedIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
                     val mimeTypeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE)
 
-                    // Verify index existence safely
-                    if (nameIndex != -1 && dataIndex != -1 && sizeIndex != -1 && dateModifiedIndex != -1 && mimeTypeIndex != -1) {
+                    if (nameIndex != -1 && dataIndex != -1 && sizeIndex != -1 && mimeTypeIndex != -1 && idIndex != -1) {
                         while (cursor.moveToNext()) {
+                            val id = cursor.getLong(idIndex)
                             val name = cursor.getString(nameIndex) ?: continue
                             val path = cursor.getString(dataIndex) ?: continue
                             val size = cursor.getLong(sizeIndex)
-                            val lastModified = cursor.getLong(dateModifiedIndex) * 1000L // Convert to ms
                             val mimeType = cursor.getString(mimeTypeIndex) ?: "application/octet-stream"
+                            val fileUri = ContentUris.withAppendedId(uri, id)
 
-                            // Avoid adding duplicates of the same path
-                            if (filesList.none { it.path == path }) {
-                                filesList.add(
-                                    FileEntity(
-                                        name = name,
-                                        path = path,
-                                        size = size,
-                                        lastModified = if (lastModified > 0) lastModified else System.currentTimeMillis(),
-                                        mimeType = mimeType,
-                                        isLocal = true,
-                                        isSafe = false,
-                                        isDuplicate = false,
-                                        isJunk = size < 1024 && (name.endsWith(".tmp") || name.startsWith("temp_") || name.endsWith(".log"))
-                                    )
+                            filesList.add(
+                                ScannedFile(
+                                    name = name,
+                                    path = path,
+                                    size = size,
+                                    mimeType = mimeType,
+                                    uri = fileUri
                                 )
-                            }
+                            )
                         }
                     }
                 }
@@ -75,15 +61,21 @@ object MediaStoreScanner {
                 Log.e("MediaStoreScanner", "Error scanning URI: $uri", e)
             }
         }
+        return filesList
+    }
 
-        // Post-process to tag actual duplicates (same size and different names)
-        val sizeGroups = filesList.groupBy { it.size }
-        val finalFiles = filesList.map { file ->
-            val sameSizeFiles = sizeGroups[file.size] ?: emptyList()
-            val hasDuplicate = sameSizeFiles.size > 1 && sameSizeFiles.any { it.name != file.name }
-            file.copy(isDuplicate = hasDuplicate)
+    fun findDuplicates(files: List<ScannedFile>): Map<String, List<ScannedFile>> {
+        val grouped = files.groupBy { "${it.name}_${it.size}" }
+        return grouped.filter { it.value.size > 1 }
+    }
+
+    fun deleteFile(uri: Uri): Boolean {
+        return try {
+            val rowsDeleted = context.contentResolver.delete(uri, null, null)
+            rowsDeleted > 0
+        } catch (e: Exception) {
+            Log.e("MediaStoreScanner", "Error deleting file: $uri", e)
+            false
         }
-
-        return finalFiles
     }
 }

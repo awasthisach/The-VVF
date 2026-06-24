@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vvf.smartfilemanager.ui.MainLayout
+import com.vvf.smartfilemanager.ui.StoragePermissionGate
 import com.vvf.smartfilemanager.ui.theme.MyApplicationTheme
 import com.vvf.smartfilemanager.viewmodel.SmartViewModel
 
@@ -38,7 +39,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             val isDarkTheme by viewModel.isDarkMode.collectAsStateWithLifecycle()
             MyApplicationTheme(darkTheme = isDarkTheme) {
-                MainLayout(viewModel = viewModel)
+                StoragePermissionGate {
+                    MainLayout(viewModel = viewModel)
+                }
             }
         }
     }
