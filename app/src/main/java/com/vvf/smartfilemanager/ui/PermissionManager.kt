@@ -19,6 +19,7 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun StoragePermissionGate(
+    onPermissionsGranted: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -34,6 +35,9 @@ fun StoragePermissionGate(
     val permState = rememberMultiplePermissionsState(permissions)
 
     if (permState.allPermissionsGranted) {
+        LaunchedEffect(Unit) {
+            onPermissionsGranted?.invoke()
+        }
         content()
     } else {
         Column(

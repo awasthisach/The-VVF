@@ -38,8 +38,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val isDarkTheme by viewModel.isDarkMode.collectAsStateWithLifecycle()
+            val context = androidx.compose.ui.platform.LocalContext.current
             MyApplicationTheme(darkTheme = isDarkTheme) {
-                StoragePermissionGate {
+                StoragePermissionGate(
+                    onPermissionsGranted = {
+                        viewModel.scanRealDeviceFiles(context)
+                    }
+                ) {
                     MainLayout(viewModel = viewModel)
                 }
             }

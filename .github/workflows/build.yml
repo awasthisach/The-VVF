@@ -23,14 +23,22 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Make Gradle executable
-        run: chmod +x gradlew
+        run: |
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+          fi
 
       - name: Create .env file from secret
         run: |
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          if [ -f gradlew ]; then
+            ./gradlew assembleDebug --no-daemon
+          else
+            gradle assembleDebug --no-daemon
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
