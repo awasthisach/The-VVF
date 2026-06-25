@@ -416,67 +416,30 @@ class FileScannerViewModel(
                     ${filesJsonArray.toString()}
                 """.trimIndent()
 
-                val requestJson = org.json.JSONObject().apply {
-                    val contentsArray = org.json.JSONArray().apply {
-                        val partObj = org.json.JSONObject().apply {
-                            put("text", prompt)
-                        }
-                        val partsArray = org.json.JSONArray().apply {
-                            put(partObj)
-                        }
-                        val contentObj = org.json.JSONObject().apply {
-                            put("parts", partsArray)
-                        }
-                        put(contentObj)
-                    }
-                    put("contents", contentsArray)
+                val (rawText, _) = repository.callGemini(
+                    apiKey = apiKey,
+                    prompt = prompt,
+                    systemInstruction = "You are an intelligent file search assistant.",
+                    enableThinkingMode = false
+                )
+
+                val cleanedText = if (rawText.startsWith("```json")) {
+                    rawText.substringAfter("```json").substringBefore("```").trim()
+                } else if (rawText.startsWith("```")) {
+                    rawText.substringAfter("```").substringBefore("```").trim()
+                } else {
+                    rawText
                 }
 
-                val client = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-
-                val mediaType = "application/json; charset=utf-8".toMediaType()
-                val body = requestJson.toString().toRequestBody(mediaType)
-                val modelName = "gemini-3.5-flash"
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
-
-                val request = okhttp3.Request.Builder()
-                    .url(url)
-                    .post(body)
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw Exception("Unsuccessful API call: ${response.code} ${response.message}")
+                val indexArray = org.json.JSONArray(cleanedText)
+                val matchedFiles = mutableListOf<ScannedFile>()
+                for (i in 0 until indexArray.length()) {
+                    val matchedIndex = indexArray.getInt(i)
+                    if (matchedIndex in availableFiles.indices) {
+                        matchedFiles.add(availableFiles[matchedIndex])
                     }
-                    val responseBodyString = response.body?.string() ?: throw Exception("Empty response body")
-                    val responseJson = org.json.JSONObject(responseBodyString)
-                    val candidates = responseJson.getJSONArray("candidates")
-                    val firstCandidate = candidates.getJSONObject(0)
-                    val content = firstCandidate.getJSONObject("content")
-                    val parts = content.getJSONArray("parts")
-                    val rawText = parts.getJSONObject(0).getString("text").trim()
-
-                    val cleanedText = if (rawText.startsWith("```json")) {
-                        rawText.substringAfter("```json").substringBefore("```").trim()
-                    } else if (rawText.startsWith("```")) {
-                        rawText.substringAfter("```").substringBefore("```").trim()
-                    } else {
-                        rawText
-                    }
-
-                    val indexArray = org.json.JSONArray(cleanedText)
-                    val matchedFiles = mutableListOf<ScannedFile>()
-                    for (i in 0 until indexArray.length()) {
-                        val matchedIndex = indexArray.getInt(i)
-                        if (matchedIndex in availableFiles.indices) {
-                            matchedFiles.add(availableFiles[matchedIndex])
-                        }
-                    }
-                    _semanticResults.value = matchedFiles
                 }
+                _semanticResults.value = matchedFiles
             } catch (e: Exception) {
                 Log.e("FileScannerViewModel", "Semantic Search Error", e)
                 val fallbackResults = _realFiles.value.filter {

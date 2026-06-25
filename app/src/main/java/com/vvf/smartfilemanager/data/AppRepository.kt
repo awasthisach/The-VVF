@@ -285,9 +285,9 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     }
 
     // Secure pluggable AI Service Provider
-    private var aiServiceProvider: IAiServiceProvider = DirectGeminiServiceProvider()
+    private var aiServiceProvider: AiProvider = GeminiProvider()
 
-    fun setAiServiceProvider(provider: IAiServiceProvider) {
+    fun setAiServiceProvider(provider: AiProvider) {
         aiServiceProvider = provider
     }
 

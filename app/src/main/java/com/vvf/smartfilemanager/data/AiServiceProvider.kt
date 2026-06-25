@@ -9,7 +9,7 @@ import retrofit2.http.POST
 import retrofit2.http.Header
 import java.util.concurrent.TimeUnit
 
-interface IAiServiceProvider {
+interface AiProvider {
     suspend fun generateContent(
         prompt: String,
         systemInstruction: String?,
@@ -18,14 +18,14 @@ interface IAiServiceProvider {
     ): Pair<String, String?>
 }
 
-class DirectGeminiServiceProvider : IAiServiceProvider {
+class GeminiProvider : AiProvider {
     override suspend fun generateContent(
         prompt: String,
         systemInstruction: String?,
         enableThinkingMode: Boolean,
         apiKey: String
     ): Pair<String, String?> {
-        val modelName = if (enableThinkingMode) "gemini-2.5-pro" else "gemini-2.0-flash"
+        val modelName = if (enableThinkingMode) "gemini-2.5-pro" else "gemini-3.5-flash"
         
         val content = Content(parts = listOf(Part(text = prompt)))
         val sysInstructionContent = systemInstruction?.let { Content(parts = listOf(Part(text = it))) }
@@ -59,7 +59,7 @@ class DirectGeminiServiceProvider : IAiServiceProvider {
     }
 }
 
-class BackendGeminiServiceProvider(private val backendBaseUrl: String) : IAiServiceProvider {
+class BackendGeminiServiceProvider(private val backendBaseUrl: String) : AiProvider {
     
     interface BackendApiService {
         @POST("api/v1/generate")
