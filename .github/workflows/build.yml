@@ -1,4 +1,5 @@
 name: Build VVF APK
+# Refreshed Gradle Wrapper step to resolve binary corruption error
 
 on:
   push:

@@ -1,3 +1,4 @@
+// Regenerated Gradle Wrapper and fixed GitHub Actions CI workflow to restore build stability
 pluginManagement {
   repositories {
     google()

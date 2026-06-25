@@ -1,3 +1,4 @@
+# Git line ending configuration and binary preservation rules
 # Set default behavior to automatic text line ending normalization.
 * text=auto
 
