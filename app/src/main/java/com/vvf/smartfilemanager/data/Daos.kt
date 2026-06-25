@@ -98,6 +98,47 @@ interface FileDao {
     @Query("SELECT * FROM files WHERE isLocal = 0 AND cloudAccountEmail = :email ORDER BY lastModified DESC")
     fun getCloudFiles(email: String): Flow<List<FileEntity>>
 
+    @Query("SELECT COUNT(*) FROM files WHERE isLocal = 1 AND isSafe = 0 AND mimeType LIKE 'image/%'")
+    fun getImagesCount(): Flow<Int>
+
+    @Query("SELECT COALESCE(SUM(size), 0) FROM files WHERE isLocal = 1 AND isSafe = 0 AND mimeType LIKE 'image/%'")
+    fun getImagesTotalSize(): Flow<Long>
+
+    @Query("SELECT COUNT(*) FROM files WHERE isLocal = 1 AND isSafe = 0 AND (mimeType LIKE '%pdf%' OR mimeType LIKE '%sheet%' OR mimeType LIKE '%document%' OR mimeType LIKE '%text%')")
+    fun getDocsCount(): Flow<Int>
+
+    @Query("SELECT COALESCE(SUM(size), 0) FROM files WHERE isLocal = 1 AND isSafe = 0 AND (mimeType LIKE '%pdf%' OR mimeType LIKE '%sheet%' OR mimeType LIKE '%document%' OR mimeType LIKE '%text%')")
+    fun getDocsTotalSize(): Flow<Long>
+
+    @Query("SELECT COUNT(*) FROM files WHERE isLocal = 1 AND isSafe = 0 AND (mimeType LIKE 'video/%' OR mimeType LIKE 'audio/%')")
+    fun getMediaCount(): Flow<Int>
+
+    @Query("SELECT COALESCE(SUM(size), 0) FROM files WHERE isLocal = 1 AND isSafe = 0 AND (mimeType LIKE 'video/%' OR mimeType LIKE 'audio/%')")
+    fun getMediaTotalSize(): Flow<Long>
+
+    @Query("""
+        UPDATE files 
+        SET isDuplicate = 1 
+        WHERE isLocal = 1 AND isSafe = 0 
+        AND id NOT IN (
+            SELECT MIN(id) 
+            FROM files 
+            WHERE isLocal = 1 AND isSafe = 0 
+            GROUP BY name, size
+        ) 
+        AND (name || '_' || size) IN (
+            SELECT (name || '_' || size) 
+            FROM files 
+            WHERE isLocal = 1 AND isSafe = 0 
+            GROUP BY name, size 
+            HAVING COUNT(*) > 1
+        )
+    """)
+    suspend fun markAllDuplicatesInDatabase()
+
+    @Query("UPDATE files SET isDuplicate = 0 WHERE isDuplicate = 1")
+    suspend fun clearAllDuplicateFlags()
+
     @Query("DELETE FROM files WHERE isLocal = 1 AND isSafe = 0")
     suspend fun clearLocalNonSafeFiles()
 

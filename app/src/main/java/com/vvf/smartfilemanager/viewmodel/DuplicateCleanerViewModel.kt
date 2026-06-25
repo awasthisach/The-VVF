@@ -18,6 +18,10 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import com.vvf.smartfilemanager.data.DuplicateScanWorker
+
 class DuplicateCleanerViewModel(
     application: Application,
     private val repository: IAppRepository
@@ -49,51 +53,29 @@ class DuplicateCleanerViewModel(
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val duplicateFilesTotalSize: StateFlow<Long> = repository.duplicateFilesTotalSize
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val duplicateFilesCount: StateFlow<Int> = repository.duplicateFilesCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
     fun runDuplicateScanner() {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _duplicateScannerState.value = ScannerState.Scanning
-            _duplicateScanProgress.value = 0.1f
-            Log.d("DuplicateCleanerVM", "Starting real duplicate database scan [StructuredLog: { event: \"duplicate_scan_start\" }]")
+            _duplicateScanProgress.value = 0.2f
+            Log.d("DuplicateCleanerVM", "Enqueuing duplicate analyzer work in WorkManager [StructuredLog: { event: \"duplicate_scan_start\" }]")
             
             try {
-                val allFiles = repository.allLocalNonSafeFiles.firstOrNull() ?: emptyList()
-                _duplicateScanProgress.value = 0.4f
-                delay(100)
+                val workRequest = OneTimeWorkRequestBuilder<DuplicateScanWorker>().build()
+                WorkManager.getInstance(getApplication()).enqueue(workRequest)
                 
-                val groups = allFiles.groupBy { it.name + "_" + it.size }
-                
-                val filesToUpdate = mutableListOf<FileEntity>()
-                var duplicatesCount = 0
-                for ((_, fileList) in groups) {
-                    if (fileList.size > 1) {
-                        for (index in fileList.indices) {
-                            val file = fileList[index]
-                            val shouldBeDuplicate = index > 0
-                            if (file.isDuplicate != shouldBeDuplicate) {
-                                filesToUpdate.add(file.copy(isDuplicate = shouldBeDuplicate))
-                                if (shouldBeDuplicate) duplicatesCount++
-                            }
-                        }
-                    } else {
-                        val file = fileList.firstOrNull()
-                        if (file != null && file.isDuplicate) {
-                            filesToUpdate.add(file.copy(isDuplicate = false))
-                        }
-                    }
-                }
-
-                if (filesToUpdate.isNotEmpty()) {
-                    repository.updateFiles(filesToUpdate)
-                }
-                
-                _duplicateScanProgress.value = 0.8f
-                delay(100)
-                
+                _duplicateScanProgress.value = 0.6f
+                delay(200)
                 _duplicateScanProgress.value = 1.0f
                 _duplicateScannerState.value = ScannerState.Finished
-                Log.i("DuplicateCleanerVM", "Real duplicate scan finished [StructuredLog: { event: \"duplicate_scan_finish\", found: $duplicatesCount }]")
+                Log.i("DuplicateCleanerVM", "Duplicate analysis successfully offloaded to WorkManager")
             } catch (e: Exception) {
-                Log.e("DuplicateCleanerVM", "Error during duplicate scanner run", e)
+                Log.e("DuplicateCleanerVM", "Failed to enqueue duplicate scan worker", e)
                 _duplicateScannerState.value = ScannerState.Finished
                 _duplicateScanProgress.value = 1.0f
             }

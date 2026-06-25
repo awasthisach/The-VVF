@@ -31,6 +31,21 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     override val safeFilesCount: Flow<Int> = fileDao.getSafeFilesCount()
     override val duplicateFilesCount: Flow<Int> = fileDao.getDuplicateFilesCount()
 
+    override val imagesCount: Flow<Int> = fileDao.getImagesCount()
+    override val imagesTotalSize: Flow<Long> = fileDao.getImagesTotalSize()
+    override val docsCount: Flow<Int> = fileDao.getDocsCount()
+    override val docsTotalSize: Flow<Long> = fileDao.getDocsTotalSize()
+    override val mediaCount: Flow<Int> = fileDao.getMediaCount()
+    override val mediaTotalSize: Flow<Long> = fileDao.getMediaTotalSize()
+
+    override suspend fun markAllDuplicatesInDatabase() = withContext(Dispatchers.IO) {
+        fileDao.markAllDuplicatesInDatabase()
+    }
+
+    override suspend fun clearAllDuplicateFlags() = withContext(Dispatchers.IO) {
+        fileDao.clearAllDuplicateFlags()
+    }
+
     override fun searchLocalNonSafeFiles(query: String, category: String, limit: Int): Flow<List<FileEntity>> {
         return fileDao.searchLocalNonSafeFiles(query, category, limit)
     }

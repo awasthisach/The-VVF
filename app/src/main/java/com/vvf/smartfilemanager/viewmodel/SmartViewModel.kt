@@ -115,6 +115,13 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val localNonSafeFilesCount: StateFlow<Int> = fileScannerViewModel.localNonSafeFilesCount
     val safeFilesCount: StateFlow<Int> = fileScannerViewModel.safeFilesCount
     val duplicateFilesCount: StateFlow<Int> = fileScannerViewModel.duplicateFilesCount
+
+    val imagesCount: StateFlow<Int> = fileScannerViewModel.imagesCount
+    val imagesTotalSize: StateFlow<Long> = fileScannerViewModel.imagesTotalSize
+    val docsCount: StateFlow<Int> = fileScannerViewModel.docsCount
+    val docsTotalSize: StateFlow<Long> = fileScannerViewModel.docsTotalSize
+    val mediaCount: StateFlow<Int> = fileScannerViewModel.mediaCount
+    val mediaTotalSize: StateFlow<Long> = fileScannerViewModel.mediaTotalSize
     val selectedCategory: StateFlow<String> = fileScannerViewModel.selectedCategory
     val filteredLocalFiles: StateFlow<List<FileEntity>> = fileScannerViewModel.filteredLocalFiles
     val localSearchQuery: StateFlow<String> = fileScannerViewModel.localSearchQuery

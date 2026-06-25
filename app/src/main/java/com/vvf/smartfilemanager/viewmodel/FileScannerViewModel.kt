@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.io.File
 import com.vvf.smartfilemanager.BuildConfig
@@ -193,6 +195,24 @@ class FileScannerViewModel(
     val duplicateFilesCount: StateFlow<Int> = repository.duplicateFilesCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    val imagesCount: StateFlow<Int> = repository.imagesCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val imagesTotalSize: StateFlow<Long> = repository.imagesTotalSize
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val docsCount: StateFlow<Int> = repository.docsCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val docsTotalSize: StateFlow<Long> = repository.docsTotalSize
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val mediaCount: StateFlow<Int> = repository.mediaCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val mediaTotalSize: StateFlow<Long> = repository.mediaTotalSize
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
     private val _localSearchQuery = MutableStateFlow("")
     val localSearchQuery: StateFlow<String> = _localSearchQuery.asStateFlow()
 
@@ -348,15 +368,30 @@ class FileScannerViewModel(
 
             try {
                 // Prevent OOM and context length limitations under massive datasets (e.g. 1,000,000 files)
-                // We pre-filter the files to a safe subset of up to 300 matching candidates or most recent files.
+                // We pre-filter the files to a safe subset of up to 300 matching candidates using fast database indexed search.
                 val searchKeywords = query.split(" ").filter { it.trim().length > 1 }
                 val availableFiles = if (searchKeywords.isEmpty()) {
                     _realFiles.value.take(300)
                 } else {
-                    val matching = _realFiles.value.filter { file ->
-                        searchKeywords.any { kw -> file.name.contains(kw, ignoreCase = true) }
+                    val dbCandidates = repository.searchLocalNonSafeFiles(query, "ALL", 300).firstOrNull() ?: emptyList()
+                    if (dbCandidates.isNotEmpty()) {
+                        dbCandidates.map { entity ->
+                            ScannedFile(
+                                name = entity.name,
+                                path = entity.path,
+                                size = entity.size,
+                                mimeType = entity.mimeType,
+                                uri = Uri.parse(entity.path),
+                                dateModified = entity.lastModified
+                            )
+                        }
+                    } else {
+                        // Fallback to in-memory check over a safe subset if database query returns empty
+                        val matching = _realFiles.value.filter { file ->
+                            searchKeywords.any { kw -> file.name.contains(kw, ignoreCase = true) }
+                        }
+                        if (matching.isEmpty()) _realFiles.value.take(300) else matching.take(300)
                     }
-                    if (matching.isEmpty()) _realFiles.value.take(300) else matching.take(300)
                 }
 
                 val filesJsonArray = org.json.JSONArray()
@@ -880,6 +915,17 @@ class FileScannerViewModel(
             if (success) {
                 val pathsToDelete = files.map { it.path }.toSet()
                 _realFiles.value = _realFiles.value.filter { it.path !in pathsToDelete }
+                
+                // Immediately delete matching database entities within a transaction boundary
+                try {
+                    val dbEntities = repository.allLocalNonSafeFiles.firstOrNull() ?: emptyList()
+                    dbEntities.filter { it.path in pathsToDelete }.forEach { entity ->
+                        repository.deleteFileById(entity.id)
+                    }
+                } catch (dbEx: Exception) {
+                    Log.e("FileScannerViewModel", "Failed to remove database records for batch deleted files", dbEx)
+                }
+
                 _safTreeUri.value?.let { scanSafFiles(context) }
             }
             withContext(Dispatchers.Main) {
@@ -918,6 +964,17 @@ class FileScannerViewModel(
             }
             if (success) {
                 _realFiles.value = _realFiles.value.filter { it.path != file.path }
+                
+                // Keep DB in absolute sync
+                try {
+                    val dbEntities = repository.allLocalNonSafeFiles.firstOrNull() ?: emptyList()
+                    dbEntities.find { it.path == file.path }?.let { entity ->
+                        repository.deleteFileById(entity.id)
+                    }
+                } catch (dbEx: Exception) {
+                    Log.e("FileScannerViewModel", "Failed to sync database deletion", dbEx)
+                }
+
                 _safTreeUri.value?.let { scanSafFiles(context) }
             }
             withContext(Dispatchers.Main) {

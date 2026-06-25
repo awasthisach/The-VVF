@@ -351,30 +351,16 @@ fun CleanScreen(viewModel: SmartViewModel) {
 
         // Storage Donut Chart Breakdown
         item {
-            val imagesList = remember(allLocalNonSafeFiles) { allLocalNonSafeFiles.filter { it.mimeType.startsWith("image/") } }
-            val imagesSize = remember(imagesList) { imagesList.sumOf { it.size } }
-            val imagesCount = imagesList.size
-
-            val docsList = remember(allLocalNonSafeFiles) {
-                allLocalNonSafeFiles.filter {
-                    it.mimeType.contains("pdf") || it.mimeType.contains("sheet") ||
-                    it.mimeType.contains("document") || it.mimeType.contains("text") ||
-                    it.name.endsWith(".pdf") || it.name.endsWith(".txt") ||
-                    it.name.endsWith(".doc") || it.name.endsWith(".docx") ||
-                    it.name.endsWith(".xls") || it.name.endsWith(".xlsx")
-                }
-            }
-            val docsSize = remember(docsList) { docsList.sumOf { it.size } }
-            val docsCount = docsList.size
-
-            val mediaList = remember(allLocalNonSafeFiles) { allLocalNonSafeFiles.filter { it.mimeType.startsWith("video/") || it.mimeType.startsWith("audio/") } }
-            val mediaSize = remember(mediaList) { mediaList.sumOf { it.size } }
-            val mediaCount = mediaList.size
+            val imagesCount by viewModel.imagesCount.collectAsStateWithLifecycle()
+            val imagesSize by viewModel.imagesTotalSize.collectAsStateWithLifecycle()
+            val docsCount by viewModel.docsCount.collectAsStateWithLifecycle()
+            val docsSize by viewModel.docsTotalSize.collectAsStateWithLifecycle()
+            val mediaCount by viewModel.mediaCount.collectAsStateWithLifecycle()
+            val mediaSize by viewModel.mediaTotalSize.collectAsStateWithLifecycle()
 
             val totalCategorizedSize = imagesSize + docsSize + mediaSize
-            val totalNonSafeSize = remember(allLocalNonSafeFiles) { allLocalNonSafeFiles.sumOf { it.size } }
-            val othersSize = maxOf(0L, totalNonSafeSize - totalCategorizedSize)
-            val othersCount = maxOf(0, allLocalNonSafeFiles.size - (imagesCount + docsCount + mediaCount))
+            val othersSize = maxOf(0L, localNonSafeFilesTotalSize - totalCategorizedSize)
+            val othersCount = maxOf(0, localNonSafeFilesCount - (imagesCount + docsCount + mediaCount))
 
             StorageDonutChartCard(
                 imagesSize = imagesSize,

@@ -18,6 +18,16 @@ interface IAppRepository {
     val safeFilesCount: Flow<Int>
     val duplicateFilesCount: Flow<Int>
 
+    val imagesCount: Flow<Int>
+    val imagesTotalSize: Flow<Long>
+    val docsCount: Flow<Int>
+    val docsTotalSize: Flow<Long>
+    val mediaCount: Flow<Int>
+    val mediaTotalSize: Flow<Long>
+
+    suspend fun markAllDuplicatesInDatabase()
+    suspend fun clearAllDuplicateFlags()
+
     fun searchLocalNonSafeFiles(query: String, category: String, limit: Int): Flow<List<FileEntity>>
     fun getScannedDuplicates(limit: Int): Flow<List<FileEntity>>
     fun getLargeTempFiles(limit: Int): Flow<List<FileEntity>>
