@@ -241,6 +241,7 @@ fun MainLayout(viewModel: SmartViewModel) {
 @Composable
 fun CleanScreen(viewModel: SmartViewModel) {
     val context = LocalContext.current
+    val allLocalNonSafeFiles by viewModel.allLocalNonSafeFiles.collectAsStateWithLifecycle()
     val localNonSafeFilesTotalSize by viewModel.localNonSafeFilesTotalSize.collectAsStateWithLifecycle()
     val junkFilesTotalSize by viewModel.junkFilesTotalSize.collectAsStateWithLifecycle()
     val duplicateFilesTotalSize by viewModel.duplicateFilesTotalSize.collectAsStateWithLifecycle()
@@ -346,6 +347,49 @@ fun CleanScreen(viewModel: SmartViewModel) {
                     }
                 }
             }
+        }
+
+        // Storage Donut Chart Breakdown
+        item {
+            val imagesList = remember(allLocalNonSafeFiles) { allLocalNonSafeFiles.filter { it.mimeType.startsWith("image/") } }
+            val imagesSize = remember(imagesList) { imagesList.sumOf { it.size } }
+            val imagesCount = imagesList.size
+
+            val docsList = remember(allLocalNonSafeFiles) {
+                allLocalNonSafeFiles.filter {
+                    it.mimeType.contains("pdf") || it.mimeType.contains("sheet") ||
+                    it.mimeType.contains("document") || it.mimeType.contains("text") ||
+                    it.name.endsWith(".pdf") || it.name.endsWith(".txt") ||
+                    it.name.endsWith(".doc") || it.name.endsWith(".docx") ||
+                    it.name.endsWith(".xls") || it.name.endsWith(".xlsx")
+                }
+            }
+            val docsSize = remember(docsList) { docsList.sumOf { it.size } }
+            val docsCount = docsList.size
+
+            val mediaList = remember(allLocalNonSafeFiles) { allLocalNonSafeFiles.filter { it.mimeType.startsWith("video/") || it.mimeType.startsWith("audio/") } }
+            val mediaSize = remember(mediaList) { mediaList.sumOf { it.size } }
+            val mediaCount = mediaList.size
+
+            val totalCategorizedSize = imagesSize + docsSize + mediaSize
+            val totalNonSafeSize = remember(allLocalNonSafeFiles) { allLocalNonSafeFiles.sumOf { it.size } }
+            val othersSize = maxOf(0L, totalNonSafeSize - totalCategorizedSize)
+            val othersCount = maxOf(0, allLocalNonSafeFiles.size - (imagesCount + docsCount + mediaCount))
+
+            StorageDonutChartCard(
+                imagesSize = imagesSize,
+                imagesCount = imagesCount,
+                docsSize = docsSize,
+                docsCount = docsCount,
+                mediaSize = mediaSize,
+                mediaCount = mediaCount,
+                dupJunkSize = duplicateFilesTotalSize + junkFilesTotalSize,
+                dupJunkCount = duplicateFilesCount + (if (junkFilesTotalSize > 0L) 5 else 0),
+                othersSize = othersSize,
+                othersCount = othersCount,
+                totalSize = usedSpace,
+                formatSize = { viewModel.formatSize(it) }
+            )
         }
 
         // Action Card 0: Advanced Storage Cleaner Scan card
@@ -898,6 +942,151 @@ fun CleanScreen(viewModel: SmartViewModel) {
     }
 }
 
+@Composable
+fun StorageDonutChartCard(
+    imagesSize: Long,
+    imagesCount: Int,
+    docsSize: Long,
+    docsCount: Int,
+    mediaSize: Long,
+    mediaCount: Int,
+    dupJunkSize: Long,
+    dupJunkCount: Int,
+    othersSize: Long,
+    othersCount: Int,
+    totalSize: Long,
+    formatSize: (Long) -> String
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("storage_donut_chart_card"),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Storage Visual Breakdown | संग्रहण विवरण",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            val categories = remember(imagesSize, docsSize, mediaSize, dupJunkSize, othersSize) {
+                val list = mutableListOf<DonutCategory>()
+                val totalCalculated = imagesSize + docsSize + mediaSize + dupJunkSize + othersSize
+                val safeTotal = if (totalCalculated == 0L) 1L else totalCalculated
+
+                list.add(DonutCategory("Images", imagesSize, imagesCount, Color(0xFF2E7D32), imagesSize.toFloat() / safeTotal))
+                list.add(DonutCategory("Documents", docsSize, docsCount, Color(0xFF1565C0), docsSize.toFloat() / safeTotal))
+                list.add(DonutCategory("Media", mediaSize, mediaCount, Color(0xFF6A1B9A), mediaSize.toFloat() / safeTotal))
+                list.add(DonutCategory("Duplicates & Junk", dupJunkSize, dupJunkCount, Color(0xFFC62828), dupJunkSize.toFloat() / safeTotal))
+                list.add(DonutCategory("Others", othersSize, othersCount, Color(0xFFEF6C00), othersSize.toFloat() / safeTotal))
+                list
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Donut Chart Canvas
+                Box(
+                    modifier = Modifier.size(110.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        var startAngle = -90f
+                        categories.forEach { category ->
+                            val sweepAngle = category.percentage * 360f
+                            if (sweepAngle > 0f) {
+                                drawArc(
+                                    color = category.color,
+                                    startAngle = startAngle,
+                                    sweepAngle = sweepAngle,
+                                    useCenter = false,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                        width = 12.dp.toPx(),
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                    )
+                                )
+                                startAngle += sweepAngle
+                            }
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = formatSize(totalSize),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "Total Used",
+                            fontSize = 8.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+
+                // Legend List
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    categories.forEach { category ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(category.color)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = category.name,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "${category.count} files",
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = formatSize(category.size),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+data class DonutCategory(
+    val name: String,
+    val size: Long,
+    val count: Int,
+    val color: Color,
+    val percentage: Float
+)
+
 // ==========================================
 // SCREEN 2: GOOGLE FILES BROWSE SCREEN
 @Composable
@@ -923,11 +1112,42 @@ fun BrowseScreen(viewModel: SmartViewModel) {
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     var browseSubTab by remember { mutableStateOf(0) } // 0: My Files, 1: Duplicates, 2: Simulated
     var realFileToDelete by remember { mutableStateOf<ScannedFile?>(null) }
+    var selectedRealFiles by remember { mutableStateOf(emptySet<ScannedFile>()) }
+    var isRealMultiSelect by remember { mutableStateOf(false) }
+    var showMultiDeleteDialog by remember { mutableStateOf(false) }
+    var showBatchRenameDialog by remember { mutableStateOf(false) }
+    var batchRenamePrefixInput by remember { mutableStateOf("") }
+    var batchRenameAddDateStamp by remember { mutableStateOf(false) }
+    var batchRenameAddSequence by remember { mutableStateOf(true) }
 
     var renameFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
     var renameFileNameInput by remember { mutableStateOf("") }
     var copyFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
     var moveFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
+
+    val openDocTreeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let { viewModel.onSafDirectorySelected(context, it) }
+    }
+
+    val moveFolderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let { destUri ->
+            moveFileTarget?.let { file ->
+                viewModel.movePhysicalFile(context, file, destUri.toString()) { success ->
+                    if (success) {
+                        Toast.makeText(context, "File moved successfully!", Toast.LENGTH_SHORT).show()
+                        viewModel.scanRealFiles()
+                    } else {
+                        Toast.makeText(context, "Move failed.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+        moveFileTarget = null
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -982,265 +1202,606 @@ fun BrowseScreen(viewModel: SmartViewModel) {
             when (browseSubTab) {
                 0 -> {
                     // MY FILES SUB-TAB
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        // Search bar
-                        OutlinedTextField(
-                            value = realFileSearchQuery,
-                            onValueChange = { viewModel.updateRealFileSearchQuery(it) },
-                            placeholder = { Text("Search real scanned files...") },
-                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(28.dp),
-                            singleLine = true
-                        )
-
-                        val openDocTreeLauncher = rememberLauncherForActivityResult(
-                            contract = ActivityResultContracts.OpenDocumentTree()
-                        ) { uri ->
-                            uri?.let { viewModel.onSafDirectorySelected(context, it) }
-                        }
-
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
-                                .testTag("saf_control_card"),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (safTreeUri != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
-                                else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f)
-                            ),
-                            border = BorderStroke(
-                                1.dp,
-                                if (safTreeUri != null) MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)
-                                else MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
-                            ),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            // Sort Order Select Row
+                            val currentSortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
                             Row(
-                                modifier = Modifier.padding(16.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Sort:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                SortOrder.values().forEach { order ->
+                                    val label = when (order) {
+                                        SortOrder.NAME_ASC -> "Name A-Z"
+                                        SortOrder.NAME_DESC -> "Name Z-A"
+                                        SortOrder.DATE_NEWEST -> "Newest"
+                                        SortOrder.DATE_OLDEST -> "Oldest"
+                                        SortOrder.SIZE_LARGEST -> "Largest"
+                                        SortOrder.SIZE_SMALLEST -> "Smallest"
+                                    }
+                                    FilterChip(
+                                        selected = currentSortOrder == order,
+                                        onClick = { viewModel.updateSortOrder(order) },
+                                        label = { Text(label, fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+
+                            // Search bar + Smart search button row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = realFileSearchQuery,
+                                    onValueChange = { viewModel.updateRealFileSearchQuery(it) },
+                                    placeholder = { Text("Search real scanned files...") },
+                                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary) },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(28.dp),
+                                    singleLine = true
+                                )
+
+                                val isSemanticSearching by viewModel.isSemanticSearching.collectAsStateWithLifecycle()
+                                val useSemanticResults by viewModel.useSemanticResults.collectAsStateWithLifecycle()
+
+                                IconButton(
+                                    onClick = {
+                                        if (useSemanticResults) {
+                                            viewModel.setUseSemanticResults(false)
+                                        } else {
+                                            viewModel.smartGeminiSemanticSearch(realFileSearchQuery)
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .background(
+                                            if (useSemanticResults) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceVariant,
+                                            shape = CircleShape
+                                        )
+                                ) {
+                                    if (isSemanticSearching) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Filled.AutoAwesome,
+                                            contentDescription = "Smart Search",
+                                            tint = if (useSemanticResults) MaterialTheme.colorScheme.onPrimary
+                                                   else MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                                    .testTag("saf_control_card"),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (safTreeUri != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+                                    else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f)
+                                ),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (safTreeUri != null) MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)
+                                    else MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (safTreeUri != null) "✓ SAF Directory Connected" else "⚠ SAF Directory Required",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = if (safTreeUri != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = if (safTreeUri != null) {
+                                                "Active SAF Uri: ...${safTreeUri?.takeLast(35)}"
+                                            } else {
+                                                "Grant folder permission to execute real Rename, Copy, Move & Delete safely."
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { openDocTreeLauncher.launch(null) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (safTreeUri != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
+                                        )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.FolderOpen,
+                                            contentDescription = "SAF Folder",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(if (safTreeUri != null) "Change" else "Grant")
+                                    }
+                                }
+                            }
+
+                            // Pinned Folders / Quick Access Row
+                            val pinnedDirs by viewModel.pinnedDirectories.collectAsStateWithLifecycle()
+                            val activeFolderFilter by viewModel.selectedFolderFilter.collectAsStateWithLifecycle()
+                            val scannedFolders = remember(realFiles) {
+                                realFiles.map {
+                                    val parentPath = it.path.substringBeforeLast("/", "")
+                                    val folderName = if (parentPath.contains("/")) parentPath.substringAfterLast("/") else parentPath
+                                    if (folderName.isBlank()) "Root" else folderName
+                                }.filter { it != "Root" && !it.contains(".") }.toSet()
+                            }
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Quick Access Pinned Folders | त्वरित पहुँच",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    if (activeFolderFilter != null) {
+                                        TextButton(
+                                            onClick = { viewModel.clearFolderFilter() },
+                                            contentPadding = PaddingValues(0.dp)
+                                        ) {
+                                            Text("Clear Filter", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    pinnedDirs.forEach { folder ->
+                                        val isCurrent = activeFolderFilter == folder
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(
+                                                    if (isCurrent) MaterialTheme.colorScheme.primaryContainer
+                                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                                )
+                                                .border(
+                                                    1.dp,
+                                                    if (isCurrent) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.outlineVariant,
+                                                    RoundedCornerShape(16.dp)
+                                                )
+                                                .clickable { viewModel.toggleFolderFilter(folder) }
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.FolderSpecial,
+                                                    contentDescription = "Pinned folder",
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Text(
+                                                    text = folder,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    fontSize = 11.sp
+                                                )
+                                                IconButton(
+                                                    onClick = { viewModel.togglePinnedDirectory(folder) },
+                                                    modifier = Modifier.size(16.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Close,
+                                                        contentDescription = "Unpin",
+                                                        modifier = Modifier.size(10.dp),
+                                                        tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    val unpinnedFolders = scannedFolders.filter { !pinnedDirs.contains(it) }
+                                    if (unpinnedFolders.isNotEmpty()) {
+                                        var showAddPinDialog by remember { mutableStateOf(false) }
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                                .border(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.outlineVariant,
+                                                    RoundedCornerShape(16.dp)
+                                                )
+                                                .clickable { showAddPinDialog = true }
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Bookmark,
+                                                    contentDescription = "Pin folder helper",
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    text = "+ Pin Folder",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+
+                                        if (showAddPinDialog) {
+                                            AlertDialog(
+                                                onDismissRequest = { showAddPinDialog = false },
+                                                title = { Text("Pin a Scanned Folder", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
+                                                text = {
+                                                    Column(modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
+                                                        Text("Select a scanned folder to pin to your Quick Access bar at the top:", style = MaterialTheme.typography.bodySmall)
+                                                        Spacer(modifier = Modifier.height(8.dp))
+                                                        unpinnedFolders.forEach { folder ->
+                                                            Row(
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth()
+                                                                    .clickable {
+                                                                        viewModel.togglePinnedDirectory(folder)
+                                                                        showAddPinDialog = false
+                                                                    }
+                                                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Icon(Icons.Filled.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                                                Spacer(modifier = Modifier.width(10.dp))
+                                                                Text(folder, fontSize = 13.sp)
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                confirmButton = {
+                                                    TextButton(onClick = { showAddPinDialog = false }) {
+                                                        Text("Close")
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Scan section
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = if (safTreeUri != null) "✓ SAF Directory Connected" else "⚠ SAF Directory Required",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = if (safTreeUri != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = if (safTreeUri != null) {
-                                            "Active SAF Uri: ...${safTreeUri?.takeLast(35)}"
-                                        } else {
-                                            "Grant folder permission to execute real Rename, Copy, Move & Delete safely."
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Button(
-                                    onClick = { openDocTreeLauncher.launch(null) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (safTreeUri != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
-                                    )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.FolderOpen,
-                                        contentDescription = "SAF Folder",
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(if (safTreeUri != null) "Change" else "Grant")
-                                }
-                            }
-                        }
-
-                        // Scan section
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Scanned Storage",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Button(
-                                onClick = { viewModel.scanRealFiles() },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                            ) {
-                                Icon(Icons.Filled.Refresh, "Scan", modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Scan Now")
-                            }
-                        }
-
-                        // Scanning indicators
-                        if (isScanningRealFiles) {
-                            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                                LinearProgressIndicator(
-                                    progress = { realScanProgress },
-                                    modifier = Modifier.fillMaxWidth()
+                                Text(
+                                    text = "Scanned Storage",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { viewModel.scanRealFiles() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Icon(Icons.Filled.Refresh, "Scan", modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Scan Now")
+                                }
+                            }
+
+                            // Scanning indicators
+                            if (isScanningRealFiles) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                                    LinearProgressIndicator(
+                                        progress = { realScanProgress },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = realScanStatusMessage,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else if (realScanStatusMessage.isNotEmpty()) {
                                 Text(
                                     text = realScanStatusMessage,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                                 )
                             }
-                        } else if (realScanStatusMessage.isNotEmpty()) {
-                            Text(
-                                text = realScanStatusMessage,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                            )
-                        }
 
-                        if (filteredRealFiles.isEmpty() && !isScanningRealFiles) {
-                            Box(
-                                modifier = Modifier.fillMaxSize().weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        imageVector = Icons.Filled.FolderOpen,
-                                        contentDescription = "Empty",
-                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                                        modifier = Modifier.size(56.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text("No scanned real files found. Run a scan!", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                            val useSemanticResults by viewModel.useSemanticResults.collectAsStateWithLifecycle()
+                            val semanticResults by viewModel.semanticResults.collectAsStateWithLifecycle()
+                            val filesToShow = if (useSemanticResults) semanticResults else filteredRealFiles
+
+                            if (filesToShow.isEmpty() && !isScanningRealFiles) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize().weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            imageVector = Icons.Filled.FolderOpen,
+                                            contentDescription = "Empty",
+                                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                            modifier = Modifier.size(56.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text("No scanned real files found. Run a scan!", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                    }
                                 }
-                            }
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(bottom = 80.dp)
-                            ) {
-                                items(filteredRealFiles) { file ->
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                                            .combinedClickable(
-                                                onClick = {
-                                                    Toast.makeText(context, "Long-press to delete: ${file.name}", Toast.LENGTH_SHORT).show()
-                                                },
-                                                onLongClick = {
-                                                    realFileToDelete = file
-                                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(bottom = 80.dp)
+                                ) {
+                                    items(filesToShow) { file ->
+                                        val isSelected = selectedRealFiles.contains(file)
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                                .combinedClickable(
+                                                    onClick = {
+                                                        if (isRealMultiSelect) {
+                                                            selectedRealFiles = if (isSelected) {
+                                                                selectedRealFiles - file
+                                                            } else {
+                                                                selectedRealFiles + file
+                                                            }
+                                                            if (selectedRealFiles.isEmpty()) {
+                                                                isRealMultiSelect = false
+                                                            }
+                                                        } else {
+                                                            Toast.makeText(context, "Long-press to select multiple files", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    },
+                                                    onLongClick = {
+                                                        if (!isRealMultiSelect) {
+                                                            isRealMultiSelect = true
+                                                            selectedRealFiles = setOf(file)
+                                                        }
+                                                    }
+                                                ),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                                else MaterialTheme.colorScheme.surface
                                             ),
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isSelected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.outlineVariant
+                                            ),
+                                            shape = RoundedCornerShape(12.dp)
                                         ) {
-                                            val icon = when {
-                                                file.mimeType.startsWith("image/") -> Icons.Filled.Image
-                                                file.mimeType.startsWith("video/") -> Icons.Filled.Movie
-                                                file.mimeType.startsWith("audio/") -> Icons.Filled.MusicNote
-                                                else -> Icons.Filled.Description
-                                            }
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(40.dp)
-                                                    .clip(CircleShape)
-                                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                                                contentAlignment = Alignment.Center
+                                            Row(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                            }
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = file.name,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                val icon = when {
+                                                    file.mimeType.startsWith("image/") -> Icons.Filled.Image
+                                                    file.mimeType.startsWith("video/") -> Icons.Filled.Movie
+                                                    file.mimeType.startsWith("audio/") -> Icons.Filled.MusicNote
+                                                    else -> Icons.Filled.Description
+                                                }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(40.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (isSelected) MaterialTheme.colorScheme.primary
+                                                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                                        ),
+                                                    contentAlignment = Alignment.Center
                                                 ) {
+                                                    if (isSelected) {
+                                                        Icon(Icons.Filled.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.onPrimary)
+                                                    } else {
+                                                        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
                                                     Text(
-                                                        text = viewModel.formatSize(file.size),
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        fontSize = 11.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        text = file.name,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
                                                     )
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(4.dp))
-                                                            .background(MaterialTheme.colorScheme.secondaryContainer)
-                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                     ) {
                                                         Text(
-                                                            text = file.mimeType.substringAfter("/").uppercase(),
+                                                            text = viewModel.formatSize(file.size),
                                                             style = MaterialTheme.typography.bodySmall,
-                                                            fontSize = 9.sp,
-                                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                                            fontWeight = FontWeight.Bold
+                                                            fontSize = 11.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(4.dp))
+                                                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = file.mimeType.substringAfter("/").uppercase(),
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                fontSize = 9.sp,
+                                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                var showMenu by remember { mutableStateOf(false) }
+                                                Box {
+                                                    IconButton(onClick = { showMenu = true }) {
+                                                        Icon(Icons.Filled.MoreVert, contentDescription = "Options")
+                                                    }
+                                                    DropdownMenu(
+                                                        expanded = showMenu,
+                                                        onDismissRequest = { showMenu = false }
+                                                    ) {
+                                                        DropdownMenuItem(
+                                                            text = { Text("✏ Rename") },
+                                                            onClick = {
+                                                                showMenu = false
+                                                                renameFileTarget = file
+                                                                renameFileNameInput = file.name
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("📋 Copy to Connected Folder") },
+                                                            onClick = {
+                                                                showMenu = false
+                                                                copyFileTarget = file
+                                                            },
+                                                            enabled = safTreeUri != null
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("➡️ Move to Connected Folder") },
+                                                            onClick = {
+                                                                showMenu = false
+                                                                moveFileTarget = file
+                                                            },
+                                                            enabled = safTreeUri != null
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("❌ Delete") },
+                                                            onClick = {
+                                                                showMenu = false
+                                                                realFileToDelete = file
+                                                            }
                                                         )
                                                     }
                                                 }
                                             }
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            var showMenu by remember { mutableStateOf(false) }
-                                            Box {
-                                                IconButton(onClick = { showMenu = true }) {
-                                                    Icon(Icons.Filled.MoreVert, contentDescription = "Options")
-                                                }
-                                                DropdownMenu(
-                                                    expanded = showMenu,
-                                                    onDismissRequest = { showMenu = false }
-                                                ) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("✏ Rename") },
-                                                        onClick = {
-                                                            showMenu = false
-                                                            renameFileTarget = file
-                                                            renameFileNameInput = file.name
-                                                        }
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("📋 Copy to Connected Folder") },
-                                                        onClick = {
-                                                            showMenu = false
-                                                            copyFileTarget = file
-                                                        },
-                                                        enabled = safTreeUri != null
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("➡️ Move to Connected Folder") },
-                                                        onClick = {
-                                                            showMenu = false
-                                                            moveFileTarget = file
-                                                        },
-                                                        enabled = safTreeUri != null
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("❌ Delete") },
-                                                        onClick = {
-                                                            showMenu = false
-                                                            realFileToDelete = file
-                                                        }
-                                                    )
-                                                }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Bottom Selection Bar
+                        if (isRealMultiSelect && selectedRealFiles.isNotEmpty()) {
+                            Card(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "${selectedRealFiles.size} selected",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.titleSmall
+                                        )
+                                        Text(
+                                            text = "Total: ${viewModel.formatSize(selectedRealFiles.sumOf { it.size })}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        IconButton(
+                                            onClick = {
+                                                isRealMultiSelect = false
+                                                selectedRealFiles = emptySet()
                                             }
+                                        ) {
+                                            Icon(Icons.Filled.Close, contentDescription = "Cancel")
+                                        }
+
+                                        Button(
+                                            onClick = {
+                                                showBatchRenameDialog = true
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                        ) {
+                                            Icon(Icons.Filled.Edit, contentDescription = "Batch Rename", modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Rename")
+                                        }
+
+                                        Button(
+                                            onClick = {
+                                                showMultiDeleteDialog = true
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                        ) {
+                                            Icon(Icons.Filled.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Delete")
                                         }
                                     }
                                 }
@@ -1891,38 +2452,214 @@ fun BrowseScreen(viewModel: SmartViewModel) {
             )
         }
 
-        // Move Dialog
+        // Move Dialog with system picker support
         if (moveFileTarget != null) {
             val safUri = safTreeUri
             AlertDialog(
                 onDismissRequest = { moveFileTarget = null },
                 title = { Text("Move File") },
                 text = {
-                    Text("Move '${moveFileTarget?.name}' to the currently connected SAF folder?\nThis will copy the file to the active folder and delete the original.\n\nFolder: ...${safUri?.takeLast(35)}")
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Move '${moveFileTarget?.name}' to a folder.")
+                        Text("You can move it to the currently connected folder, or pick a different folder using the system folder picker.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (safUri != null) {
+                            Text("Current Connected: ...${safUri.takeLast(35)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 },
                 confirmButton = {
-                    TextButton(
-                        onClick = {
-                            moveFileTarget?.let { file: ScannedFile ->
-                                safUri?.let { dest: String ->
-                                    viewModel.movePhysicalFile(context, file, dest) { success: Boolean ->
-                                        if (success) {
-                                            Toast.makeText(context, "File moved successfully!", Toast.LENGTH_SHORT).show()
-                                            viewModel.scanRealFiles()
-                                        } else {
-                                            Toast.makeText(context, "Move failed.", Toast.LENGTH_SHORT).show()
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (safUri != null) {
+                            TextButton(
+                                onClick = {
+                                    moveFileTarget?.let { file ->
+                                        viewModel.movePhysicalFile(context, file, safUri) { success ->
+                                            if (success) {
+                                                Toast.makeText(context, "File moved successfully!", Toast.LENGTH_SHORT).show()
+                                                viewModel.scanRealFiles()
+                                            } else {
+                                                Toast.makeText(context, "Move failed.", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     }
+                                    moveFileTarget = null
                                 }
+                            ) {
+                                Text("Use Current")
                             }
-                            moveFileTarget = null
                         }
-                    ) {
-                        Text("Move")
+                        Button(
+                            onClick = {
+                                moveFolderPickerLauncher.launch(null)
+                            }
+                        ) {
+                            Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Select Folder")
+                        }
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { moveFileTarget = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Multi-Delete Dialog
+        if (showMultiDeleteDialog && selectedRealFiles.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = { showMultiDeleteDialog = false },
+                title = { Text("Delete Multiple Files") },
+                text = {
+                    Text("Are you sure you want to permanently delete the ${selectedRealFiles.size} selected files?\nThis action cannot be undone.")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            selectedRealFiles.forEach { file ->
+                                viewModel.deleteRealFile(file)
+                            }
+                            isRealMultiSelect = false
+                            selectedRealFiles = emptySet()
+                            showMultiDeleteDialog = false
+                            Toast.makeText(context, "Deleted selected files.", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showMultiDeleteDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Batch Rename Dialog
+        if (showBatchRenameDialog && selectedRealFiles.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = { showBatchRenameDialog = false },
+                title = { Text("Batch Rename Files | समूह नाम बदलें", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Renaming ${selectedRealFiles.size} files using custom pattern rules.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        OutlinedTextField(
+                            value = batchRenamePrefixInput,
+                            onValueChange = { batchRenamePrefixInput = it },
+                            label = { Text("Base Name / Prefix") },
+                            placeholder = { Text("e.g. Vacation, Document, Photo") },
+                            modifier = Modifier.fillMaxWidth().testTag("batch_rename_prefix_input"),
+                            shape = RoundedCornerShape(8.dp),
+                            singleLine = true
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = batchRenameAddDateStamp,
+                                onCheckedChange = { batchRenameAddDateStamp = it },
+                                modifier = Modifier.testTag("batch_rename_date_checkbox")
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Add Date Stamp", style = MaterialTheme.typography.bodyMedium)
+                                Text("Appends current date (e.g. _20260625)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = batchRenameAddSequence,
+                                onCheckedChange = { batchRenameAddSequence = it },
+                                modifier = Modifier.testTag("batch_rename_sequence_checkbox")
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Add Sequence Numbers", style = MaterialTheme.typography.bodyMedium)
+                                Text("Appends a counter (e.g. _001, _002)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                            }
+                        }
+
+                        // Preview text
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("Naming Preview:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                val sdf = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault())
+                                val dateStr = sdf.format(java.util.Date())
+                                val firstFile = selectedRealFiles.firstOrNull()
+                                val ext = firstFile?.name?.substringAfterLast(".", "") ?: "jpg"
+                                
+                                val nameParts = mutableListOf<String>()
+                                if (batchRenamePrefixInput.isNotEmpty()) {
+                                    nameParts.add(batchRenamePrefixInput)
+                                } else {
+                                    nameParts.add(firstFile?.name?.substringBeforeLast(".") ?: "filename")
+                                }
+                                if (batchRenameAddDateStamp) {
+                                    nameParts.add(dateStr)
+                                }
+                                if (batchRenameAddSequence) {
+                                    nameParts.add("001")
+                                }
+                                val previewName = nameParts.joinToString("_") + if (ext.isNotEmpty()) ".$ext" else ""
+                                Text(
+                                    text = previewName,
+                                    fontSize = 12.sp,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.batchRenamePhysicalFiles(
+                                context = context,
+                                files = selectedRealFiles.toList(),
+                                prefix = batchRenamePrefixInput,
+                                addDateStamp = batchRenameAddDateStamp,
+                                addSequence = batchRenameAddSequence
+                            ) { successCount ->
+                                Toast.makeText(context, "Successfully renamed $successCount files!", Toast.LENGTH_SHORT).show()
+                                isRealMultiSelect = false
+                                selectedRealFiles = emptySet()
+                                showBatchRenameDialog = false
+                            }
+                        },
+                        enabled = batchRenamePrefixInput.isNotEmpty() || batchRenameAddDateStamp || batchRenameAddSequence,
+                        modifier = Modifier.testTag("batch_rename_confirm_btn")
+                    ) {
+                        Text("Rename All")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBatchRenameDialog = false }) {
                         Text("Cancel")
                     }
                 }
@@ -2991,6 +3728,34 @@ fun AiAssistantScreen(viewModel: SmartViewModel) {
                             checked = highThinking,
                             onCheckedChange = { viewModel.setHighThinkingMode(it) },
                             modifier = Modifier.testTag("high_thinking_switch")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Google Drive Sync Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Filled.Cloud, "Cloud icon", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Auto Sync Google Drive", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Auto synchronize metadata with Google Drive integration.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                            }
+                        }
+
+                        val googleDriveSyncEnabled by viewModel.googleDriveSyncEnabled.collectAsStateWithLifecycle()
+                        Switch(
+                            checked = googleDriveSyncEnabled,
+                            onCheckedChange = { viewModel.setGoogleDriveSyncEnabled(it) },
+                            modifier = Modifier.testTag("google_drive_sync_switch")
                         )
                     }
 

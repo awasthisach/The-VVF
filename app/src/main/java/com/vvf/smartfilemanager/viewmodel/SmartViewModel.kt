@@ -47,10 +47,12 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
 
     // Delegated Settings States & Methods
     val highThinkingEnabled: StateFlow<Boolean> = settingsViewModel.highThinkingEnabled
+    val googleDriveSyncEnabled: StateFlow<Boolean> = settingsViewModel.googleDriveSyncEnabled
     val isApiPanelExpanded: StateFlow<Boolean> = settingsViewModel.isApiPanelExpanded
     val apiKey: StateFlow<String> = settingsViewModel.apiKey
     fun toggleApiPanel() = settingsViewModel.toggleApiPanel()
     fun setHighThinkingMode(enabled: Boolean) = settingsViewModel.setHighThinkingMode(enabled)
+    fun setGoogleDriveSyncEnabled(enabled: Boolean) = settingsViewModel.setGoogleDriveSyncEnabled(enabled)
     fun setApiKey(key: String) = settingsViewModel.setApiKey(key)
     fun getActiveApiKey(): String = settingsViewModel.getActiveApiKey()
 
@@ -125,6 +127,10 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val realScanStatusMessage: StateFlow<String> = fileScannerViewModel.realScanStatusMessage
     val realFileSearchQuery: StateFlow<String> = fileScannerViewModel.realFileSearchQuery
     val filteredRealFiles: StateFlow<List<ScannedFile>> = fileScannerViewModel.filteredRealFiles
+    val sortOrder: StateFlow<SortOrder> = fileScannerViewModel.sortOrder
+    val useSemanticResults: StateFlow<Boolean> = fileScannerViewModel.useSemanticResults
+    val semanticResults: StateFlow<List<ScannedFile>> = fileScannerViewModel.semanticResults
+    val isSemanticSearching: StateFlow<Boolean> = fileScannerViewModel.isSemanticSearching
     val safTreeUri: StateFlow<String?> = fileScannerViewModel.safTreeUri
     val pendingDeleteIntent: StateFlow<PendingIntent?> = fileScannerViewModel.pendingDeleteIntent
     val storageSelectedFileIds: StateFlow<Set<Long>> = fileScannerViewModel.storageSelectedFileIds
@@ -145,10 +151,29 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val isCloudMultiSelectMode: StateFlow<Boolean> = fileScannerViewModel.isCloudMultiSelectMode
     val activeCloudSubTab: StateFlow<Int> = fileScannerViewModel.activeCloudSubTab
 
+    val pinnedDirectories: StateFlow<Set<String>> = fileScannerViewModel.pinnedDirectories
+    val selectedFolderFilter: StateFlow<String?> = fileScannerViewModel.selectedFolderFilter
+
+    fun togglePinnedDirectory(directory: String) = fileScannerViewModel.togglePinnedDirectory(directory)
+    fun toggleFolderFilter(folder: String) = fileScannerViewModel.toggleFolderFilter(folder)
+    fun clearFolderFilter() = fileScannerViewModel.clearFolderFilter()
+
+    fun batchRenamePhysicalFiles(
+        context: Context,
+        files: List<ScannedFile>,
+        prefix: String,
+        addDateStamp: Boolean,
+        addSequence: Boolean,
+        onComplete: (Int) -> Unit
+    ) = fileScannerViewModel.batchRenamePhysicalFiles(context, files, prefix, addDateStamp, addSequence, onComplete)
+
     fun updateSelectedCategory(category: String) = fileScannerViewModel.updateSelectedCategory(category)
     fun scanRealDeviceFiles(context: Context) = fileScannerViewModel.scanRealDeviceFiles(context)
     fun scanRealFiles() = fileScannerViewModel.scanRealFiles()
     fun updateRealFileSearchQuery(query: String) = fileScannerViewModel.updateRealFileSearchQuery(query)
+    fun updateSortOrder(order: SortOrder) = fileScannerViewModel.updateSortOrder(order)
+    fun setUseSemanticResults(use: Boolean) = fileScannerViewModel.setUseSemanticResults(use)
+    fun smartGeminiSemanticSearch(query: String, onComplete: () -> Unit = {}) = fileScannerViewModel.smartGeminiSemanticSearch(query, onComplete)
     fun addLocalSimulatedFile(name: String, size: Long, mimeType: String, path: String) = fileScannerViewModel.addLocalSimulatedFile(name, size, mimeType, path)
     fun deleteRealFile(file: ScannedFile) = fileScannerViewModel.deleteRealFile(file)
     fun onSafDirectorySelected(context: Context, uri: Uri) = fileScannerViewModel.onSafDirectorySelected(context, uri)

@@ -7,5 +7,6 @@ data class ScannedFile(
     val path: String,
     val size: Long,
     val mimeType: String,
-    val uri: Uri
+    val uri: Uri,
+    val dateModified: Long
 )

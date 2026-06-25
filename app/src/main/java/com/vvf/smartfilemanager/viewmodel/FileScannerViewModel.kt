@@ -30,6 +30,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import java.io.File
+import com.vvf.smartfilemanager.BuildConfig
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class FileScannerViewModel(
     application: Application,
@@ -45,11 +48,126 @@ class FileScannerViewModel(
     private val _pendingDeleteIntent = MutableStateFlow<PendingIntent?>(null)
     val pendingDeleteIntent: StateFlow<PendingIntent?> = _pendingDeleteIntent.asStateFlow()
 
+    private val _pinnedDirectories = MutableStateFlow<Set<String>>(emptySet())
+    val pinnedDirectories: StateFlow<Set<String>> = _pinnedDirectories.asStateFlow()
+
+    private val _selectedFolderFilter = MutableStateFlow<String?>(null)
+    val selectedFolderFilter: StateFlow<String?> = _selectedFolderFilter.asStateFlow()
+
     init {
         val prefs = application.getSharedPreferences("smart_file_manager_prefs", Context.MODE_PRIVATE)
         _safTreeUri.value = prefs.getString("saf_tree_uri", null)
+        val savedPinned = prefs.getStringSet("pinned_directories", setOf("Downloads", "Documents", "Pictures")) ?: setOf("Downloads", "Documents", "Pictures")
+        _pinnedDirectories.value = savedPinned
         _safTreeUri.value?.let {
             scanSafFiles(application)
+        }
+    }
+
+    fun togglePinnedDirectory(directory: String) {
+        val current = _pinnedDirectories.value.toMutableSet()
+        if (current.contains(directory)) {
+            current.remove(directory)
+        } else {
+            current.add(directory)
+        }
+        _pinnedDirectories.value = current
+        val prefs = getApplication<Application>().getSharedPreferences("smart_file_manager_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putStringSet("pinned_directories", current).apply()
+    }
+
+    fun toggleFolderFilter(folder: String) {
+        if (_selectedFolderFilter.value == folder) {
+            _selectedFolderFilter.value = null
+        } else {
+            _selectedFolderFilter.value = folder
+        }
+    }
+
+    fun clearFolderFilter() {
+        _selectedFolderFilter.value = null
+    }
+
+    fun batchRenamePhysicalFiles(
+        context: Context,
+        files: List<ScannedFile>,
+        prefix: String,
+        addDateStamp: Boolean,
+        addSequence: Boolean,
+        onComplete: (Int) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var successCount = 0
+            val sdf = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault())
+            val dateStr = sdf.format(java.util.Date())
+            
+            files.forEachIndexed { index, file ->
+                val extension = file.name.substringAfterLast(".", "")
+                val originalBaseName = file.name.substringBeforeLast(".")
+                
+                val nameParts = mutableListOf<String>()
+                if (prefix.isNotEmpty()) {
+                    nameParts.add(prefix)
+                } else {
+                    nameParts.add(originalBaseName)
+                }
+                
+                if (addDateStamp) {
+                    nameParts.add(dateStr)
+                }
+                
+                if (addSequence) {
+                    nameParts.add(String.format("%03d", index + 1))
+                }
+                
+                val baseNewName = nameParts.joinToString("_")
+                val finalNewName = if (extension.isNotEmpty()) "$baseNewName.$extension" else baseNewName
+                
+                var success = false
+                try {
+                    val uri = file.uri
+                    if (uri.scheme == "content" && uri.authority?.contains("media") == true) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val values = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, finalNewName)
+                            }
+                            val rowsUpdated = context.contentResolver.update(uri, values, null, null)
+                            success = rowsUpdated > 0
+                        } else {
+                            val f = File(file.path)
+                            if (f.exists()) {
+                                val destination = File(f.parentFile, finalNewName)
+                                success = f.renameTo(destination)
+                            }
+                        }
+                    } else if (uri.scheme == "content") {
+                        val documentFile = DocumentFile.fromSingleUri(context, uri)
+                        if (documentFile != null && documentFile.exists()) {
+                            success = documentFile.renameTo(finalNewName)
+                        }
+                    } else {
+                        val f = File(file.path)
+                        if (f.exists()) {
+                            val destination = File(f.parentFile, finalNewName)
+                            success = f.renameTo(destination)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("FileScannerViewModel", "Failed to rename file in batch", e)
+                }
+                
+                if (success) {
+                    successCount++
+                }
+            }
+            
+            if (successCount > 0) {
+                _safTreeUri.value?.let { scanSafFiles(context) }
+            }
+            
+            withContext(Dispatchers.Main) {
+                onComplete(successCount)
+            }
         }
     }
 
@@ -118,24 +236,214 @@ class FileScannerViewModel(
     private val _isScanningRealFiles = MutableStateFlow(false)
     val isScanningRealFiles: StateFlow<Boolean> = _isScanningRealFiles.asStateFlow()
 
+    private val _sortOrder = MutableStateFlow(SortOrder.NAME_ASC)
+    val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
+
+    private val _useSemanticResults = MutableStateFlow(false)
+    val useSemanticResults: StateFlow<Boolean> = _useSemanticResults.asStateFlow()
+
+    private val _semanticResults = MutableStateFlow<List<ScannedFile>>(emptyList())
+    val semanticResults: StateFlow<List<ScannedFile>> = _semanticResults.asStateFlow()
+
+    private val _isSemanticSearching = MutableStateFlow(false)
+    val isSemanticSearching: StateFlow<Boolean> = _isSemanticSearching.asStateFlow()
+
+    fun updateSortOrder(order: SortOrder) {
+        _sortOrder.value = order
+    }
+
+    fun setUseSemanticResults(use: Boolean) {
+        _useSemanticResults.value = use
+    }
+
+    private fun calculateMd5(context: Context, uri: Uri): String {
+        return try {
+            val digest = java.security.MessageDigest.getInstance("MD5")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    digest.update(buffer, 0, bytesRead)
+                }
+            }
+            val bytes = digest.digest()
+            val sb = StringBuilder()
+            for (b in bytes) {
+                sb.append(String.format("%02x", b))
+            }
+            sb.toString()
+        } catch (e: Exception) {
+            Log.e("FileScannerViewModel", "Failed to calculate MD5", e)
+            ""
+        }
+    }
+
     val realDuplicates: StateFlow<Map<String, List<ScannedFile>>> = _realFiles.map { files ->
-        files.groupBy { "${it.name}_${it.size}" }
-            .filter { it.value.size > 1 }
+        val context = getApplication<Application>()
+        val sizeCandidates = files.groupBy { it.size }.filter { it.value.size > 1 }
+        val hashGroups = mutableMapOf<String, MutableList<ScannedFile>>()
+        sizeCandidates.forEach { (_, candidateList) ->
+            candidateList.forEach { file ->
+                val hash = calculateMd5(context, file.uri).ifEmpty { "${file.name}_${file.size}" }
+                hashGroups.getOrPut(hash) { mutableListOf() }.add(file)
+            }
+        }
+        hashGroups.filter { it.value.size > 1 }
     }
     .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     val filteredRealFiles: StateFlow<List<ScannedFile>> = combine(
-        _realFiles, _realFileSearchQuery
-    ) { files, query ->
-        if (query.isBlank()) files
-        else files.filter { it.name.contains(query, ignoreCase = true) }
+        _realFiles, _realFileSearchQuery, _sortOrder, _selectedFolderFilter
+    ) { files, query, sort, folderFilter ->
+        val afterFolderFilter = if (folderFilter == null) files
+        else files.filter { 
+            val parentPath = it.path.substringBeforeLast("/", "")
+            val folderName = if (parentPath.contains("/")) parentPath.substringAfterLast("/") else parentPath
+            folderName.equals(folderFilter, ignoreCase = true)
+        }
+
+        val filtered = if (query.isBlank()) afterFolderFilter
+        else afterFolderFilter.filter { it.name.contains(query, ignoreCase = true) }
+
+        when (sort) {
+            SortOrder.NAME_ASC -> filtered.sortedBy { it.name.lowercase() }
+            SortOrder.NAME_DESC -> filtered.sortedByDescending { it.name.lowercase() }
+            SortOrder.DATE_NEWEST -> filtered.sortedByDescending { it.dateModified }
+            SortOrder.DATE_OLDEST -> filtered.sortedBy { it.dateModified }
+            SortOrder.SIZE_LARGEST -> filtered.sortedByDescending { it.size }
+            SortOrder.SIZE_SMALLEST -> filtered.sortedBy { it.size }
+        }
     }
     .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun updateRealFileSearchQuery(query: String) {
         _realFileSearchQuery.value = query
+    }
+
+    fun smartGeminiSemanticSearch(query: String, onComplete: () -> Unit = {}) {
+        if (query.isBlank()) {
+            _useSemanticResults.value = false
+            _semanticResults.value = emptyList()
+            onComplete()
+            return
+        }
+
+        _isSemanticSearching.value = true
+        _useSemanticResults.value = true
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val apiKey = BuildConfig.GEMINI_API_KEY
+            if (apiKey.isEmpty() || apiKey == "YOUR_GEMINI_API_KEY") {
+                Log.e("FileScannerViewModel", "Gemini API Key is empty or invalid!")
+                val fallbackResults = _realFiles.value.filter {
+                    it.name.contains(query, ignoreCase = true) || it.path.contains(query, ignoreCase = true)
+                }
+                _semanticResults.value = fallbackResults
+                _isSemanticSearching.value = false
+                withContext(Dispatchers.Main) { onComplete() }
+                return@launch
+            }
+
+            try {
+                val availableFiles = _realFiles.value
+                val filesJsonArray = org.json.JSONArray()
+                availableFiles.forEachIndexed { index, file ->
+                    val fileObj = org.json.JSONObject().apply {
+                        put("index", index)
+                        put("name", file.name)
+                        put("path", file.path)
+                        put("mimeType", file.mimeType)
+                        put("size", file.size)
+                    }
+                    filesJsonArray.put(fileObj)
+                }
+
+                val prompt = """
+                    You are an intelligent file search assistant. Below is a JSON list of available files in the user's device and a semantic search query from the user.
+                    Filter the files list to include ONLY files that semantically match the search query (e.g., query "tax returns" should match files like "2025_tax_declaration.pdf", "w2_form.pdf", etc. Query "receipts" should match "invoice_amazon.jpg", "uber_ride.pdf", etc.).
+                    Return your response as a JSON array of integers representing the "index" of matching files. Return ONLY the JSON array (no markdown code blocks, no explanations).
+                    
+                    Query: "$query"
+                    Available Files:
+                    ${filesJsonArray.toString()}
+                """.trimIndent()
+
+                val requestJson = org.json.JSONObject().apply {
+                    val contentsArray = org.json.JSONArray().apply {
+                        val partObj = org.json.JSONObject().apply {
+                            put("text", prompt)
+                        }
+                        val partsArray = org.json.JSONArray().apply {
+                            put(partObj)
+                        }
+                        val contentObj = org.json.JSONObject().apply {
+                            put("parts", partsArray)
+                        }
+                        put(contentObj)
+                    }
+                    put("contents", contentsArray)
+                }
+
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val mediaType = "application/json; charset=utf-8".toMediaType()
+                val body = requestJson.toString().toRequestBody(mediaType)
+                val modelName = "gemini-3.5-flash"
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+
+                val request = okhttp3.Request.Builder()
+                    .url(url)
+                    .post(body)
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw Exception("Unsuccessful API call: ${response.code} ${response.message}")
+                    }
+                    val responseBodyString = response.body?.string() ?: throw Exception("Empty response body")
+                    val responseJson = org.json.JSONObject(responseBodyString)
+                    val candidates = responseJson.getJSONArray("candidates")
+                    val firstCandidate = candidates.getJSONObject(0)
+                    val content = firstCandidate.getJSONObject("content")
+                    val parts = content.getJSONArray("parts")
+                    val rawText = parts.getJSONObject(0).getString("text").trim()
+
+                    val cleanedText = if (rawText.startsWith("```json")) {
+                        rawText.substringAfter("```json").substringBefore("```").trim()
+                    } else if (rawText.startsWith("```")) {
+                        rawText.substringAfter("```").substringBefore("```").trim()
+                    } else {
+                        rawText
+                    }
+
+                    val indexArray = org.json.JSONArray(cleanedText)
+                    val matchedFiles = mutableListOf<ScannedFile>()
+                    for (i in 0 until indexArray.length()) {
+                        val matchedIndex = indexArray.getInt(i)
+                        if (matchedIndex in availableFiles.indices) {
+                            matchedFiles.add(availableFiles[matchedIndex])
+                        }
+                    }
+                    _semanticResults.value = matchedFiles
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Semantic Search Error", e)
+                val fallbackResults = _realFiles.value.filter {
+                    it.name.contains(query, ignoreCase = true) || it.path.contains(query, ignoreCase = true)
+                }
+                _semanticResults.value = fallbackResults
+            } finally {
+                _isSemanticSearching.value = false
+                withContext(Dispatchers.Main) {
+                    onComplete()
+                }
+            }
+        }
     }
 
     fun addLocalSimulatedFile(name: String, size: Long, mimeType: String, path: String) {
@@ -370,7 +678,8 @@ class FileScannerViewModel(
                             path = file.uri.toString(),
                             size = file.length(),
                             mimeType = file.type ?: "application/octet-stream",
-                            uri = file.uri
+                            uri = file.uri,
+                            dateModified = file.lastModified()
                         )
                     )
                 } else if (file.isDirectory) {
@@ -557,8 +866,19 @@ class FileScannerViewModel(
     }
 
     fun deleteRealDuplicates(keepFirst: Boolean = true) {
-        // Simulated duplicate deletion
-        _realFiles.value = _realFiles.value.distinctBy { Pair(it.name, it.size) }
+        val duplicatesMap = realDuplicates.value
+        val context = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            duplicatesMap.forEach { (_, fileList) ->
+                if (fileList.size > 1) {
+                    val filesToDelete = if (keepFirst) fileList.drop(1) else fileList
+                    filesToDelete.forEach { file ->
+                        deletePhysicalFile(context, file)
+                    }
+                }
+            }
+            scanRealFiles()
+        }
     }
 
     fun toggleLocalFileSelection(id: Long) {
@@ -776,3 +1096,13 @@ class FileScannerViewModel(
         return sdf.format(java.util.Date(timestamp))
     }
 }
+
+enum class SortOrder {
+    NAME_ASC,
+    NAME_DESC,
+    DATE_NEWEST,
+    DATE_OLDEST,
+    SIZE_LARGEST,
+    SIZE_SMALLEST
+}
+

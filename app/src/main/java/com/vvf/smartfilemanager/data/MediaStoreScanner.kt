@@ -12,29 +12,37 @@ class MediaStoreScanner(private val context: Context) {
         val filesList = mutableListOf<ScannedFile>()
         val contentResolver = context.contentResolver
 
-        // Projection for media queries
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.DATA,
             MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.MIME_TYPE
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.DATE_MODIFIED
         )
 
         val uris = listOf(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI to "image",
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI to "video",
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI to "audio"
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI to "audio",
+            MediaStore.Files.getContentUri("external") to "document"
         )
 
         for ((uri, type) in uris) {
             try {
-                contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                val selection = if (type == "document") {
+                    "${MediaStore.MediaColumns.MIME_TYPE} IS NOT NULL AND (" +
+                            "${MediaStore.MediaColumns.MIME_TYPE} LIKE 'application/%' OR " +
+                            "${MediaStore.MediaColumns.MIME_TYPE} LIKE 'text/%')"
+                } else null
+
+                contentResolver.query(uri, projection, selection, null, null)?.use { cursor ->
                     val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
                     val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
                     val dataIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
                     val sizeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
                     val mimeTypeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE)
+                    val dateModifiedIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
 
                     if (nameIndex != -1 && dataIndex != -1 && sizeIndex != -1 && mimeTypeIndex != -1 && idIndex != -1) {
                         while (cursor.moveToNext()) {
@@ -44,6 +52,8 @@ class MediaStoreScanner(private val context: Context) {
                             val size = cursor.getLong(sizeIndex)
                             val mimeType = cursor.getString(mimeTypeIndex) ?: "application/octet-stream"
                             val fileUri = ContentUris.withAppendedId(uri, id)
+                            val dateModSec = if (dateModifiedIndex != -1) cursor.getLong(dateModifiedIndex) else 0L
+                            val dateModified = dateModSec * 1000L
 
                             filesList.add(
                                 ScannedFile(
@@ -51,7 +61,8 @@ class MediaStoreScanner(private val context: Context) {
                                     path = path,
                                     size = size,
                                     mimeType = mimeType,
-                                    uri = fileUri
+                                    uri = fileUri,
+                                    dateModified = dateModified
                                 )
                             )
 
@@ -75,29 +86,37 @@ class MediaStoreScanner(private val context: Context) {
         val filesList = mutableListOf<ScannedFile>()
         val contentResolver = context.contentResolver
 
-        // Projection for media queries
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.DATA,
             MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.MIME_TYPE
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.DATE_MODIFIED
         )
 
         val uris = listOf(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI to "image",
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI to "video",
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI to "audio"
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI to "audio",
+            MediaStore.Files.getContentUri("external") to "document"
         )
 
         for ((uri, type) in uris) {
             try {
-                contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                val selection = if (type == "document") {
+                    "${MediaStore.MediaColumns.MIME_TYPE} IS NOT NULL AND (" +
+                            "${MediaStore.MediaColumns.MIME_TYPE} LIKE 'application/%' OR " +
+                            "${MediaStore.MediaColumns.MIME_TYPE} LIKE 'text/%')"
+                } else null
+
+                contentResolver.query(uri, projection, selection, null, null)?.use { cursor ->
                     val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
                     val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
                     val dataIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
                     val sizeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
                     val mimeTypeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE)
+                    val dateModifiedIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
 
                     if (nameIndex != -1 && dataIndex != -1 && sizeIndex != -1 && mimeTypeIndex != -1 && idIndex != -1) {
                         while (cursor.moveToNext()) {
@@ -107,6 +126,8 @@ class MediaStoreScanner(private val context: Context) {
                             val size = cursor.getLong(sizeIndex)
                             val mimeType = cursor.getString(mimeTypeIndex) ?: "application/octet-stream"
                             val fileUri = ContentUris.withAppendedId(uri, id)
+                            val dateModSec = if (dateModifiedIndex != -1) cursor.getLong(dateModifiedIndex) else 0L
+                            val dateModified = dateModSec * 1000L
 
                             filesList.add(
                                 ScannedFile(
@@ -114,7 +135,8 @@ class MediaStoreScanner(private val context: Context) {
                                     path = path,
                                     size = size,
                                     mimeType = mimeType,
-                                    uri = fileUri
+                                    uri = fileUri,
+                                    dateModified = dateModified
                                 )
                             )
                         }

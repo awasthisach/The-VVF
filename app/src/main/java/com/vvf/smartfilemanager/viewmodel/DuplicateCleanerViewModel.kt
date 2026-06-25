@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
 class DuplicateCleanerViewModel(
@@ -49,17 +50,48 @@ class DuplicateCleanerViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun runDuplicateScanner() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _duplicateScannerState.value = ScannerState.Scanning
-            _duplicateScanProgress.value = 0f
-            Log.d("DuplicateCleanerVM", "Starting duplicate files scan [StructuredLog: { event: \"duplicate_scan_start\" }]")
-            while (_duplicateScanProgress.value < 1.0f) {
-                delay(120)
-                _duplicateScanProgress.value = minOf(1.0f, _duplicateScanProgress.value + 0.1f)
+            _duplicateScanProgress.value = 0.1f
+            Log.d("DuplicateCleanerVM", "Starting real duplicate database scan [StructuredLog: { event: \"duplicate_scan_start\" }]")
+            
+            try {
+                val allFiles = repository.allLocalNonSafeFiles.firstOrNull() ?: emptyList()
+                _duplicateScanProgress.value = 0.4f
+                delay(100)
+                
+                val groups = allFiles.groupBy { it.name + "_" + it.size }
+                
+                var duplicatesCount = 0
+                for ((_, fileList) in groups) {
+                    if (fileList.size > 1) {
+                        for (index in fileList.indices) {
+                            val file = fileList[index]
+                            val shouldBeDuplicate = index > 0
+                            if (file.isDuplicate != shouldBeDuplicate) {
+                                repository.updateFile(file.copy(isDuplicate = shouldBeDuplicate))
+                                duplicatesCount++
+                            }
+                        }
+                    } else {
+                        val file = fileList.firstOrNull()
+                        if (file != null && file.isDuplicate) {
+                            repository.updateFile(file.copy(isDuplicate = false))
+                        }
+                    }
+                }
+                
+                _duplicateScanProgress.value = 0.8f
+                delay(100)
+                
+                _duplicateScanProgress.value = 1.0f
+                _duplicateScannerState.value = ScannerState.Finished
+                Log.i("DuplicateCleanerVM", "Real duplicate scan finished [StructuredLog: { event: \"duplicate_scan_finish\", found: $duplicatesCount }]")
+            } catch (e: Exception) {
+                Log.e("DuplicateCleanerVM", "Error during duplicate scanner run", e)
+                _duplicateScannerState.value = ScannerState.Finished
+                _duplicateScanProgress.value = 1.0f
             }
-            _duplicateScanProgress.value = 1.0f
-            _duplicateScannerState.value = ScannerState.Finished
-            Log.i("DuplicateCleanerVM", "Duplicate files scan finished [StructuredLog: { event: \"duplicate_scan_finish\", found: ${scannedDuplicates.value.size} }]")
         }
     }
 

@@ -27,6 +27,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _highThinkingEnabled = MutableStateFlow(backupPrefs.getBoolean("high_thinking", false))
     val highThinkingEnabled: StateFlow<Boolean> = _highThinkingEnabled.asStateFlow()
 
+    private val _googleDriveSyncEnabled = MutableStateFlow(backupPrefs.getBoolean("google_drive_sync", false))
+    val googleDriveSyncEnabled: StateFlow<Boolean> = _googleDriveSyncEnabled.asStateFlow()
+
     private val _isApiPanelExpanded = MutableStateFlow(false)
     val isApiPanelExpanded: StateFlow<Boolean> = _isApiPanelExpanded.asStateFlow()
 
@@ -38,6 +41,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         } catch (e: Exception) {
             backupPrefs.edit().putString("user_gemini_key", key).apply()
         }
+    }
+
+    fun setGoogleDriveSyncEnabled(enabled: Boolean) {
+        Log.i("SettingsViewModel", "Google Drive Sync toggled: $enabled")
+        _googleDriveSyncEnabled.value = enabled
+        backupPrefs.edit().putBoolean("google_drive_sync", enabled).apply()
     }
 
     fun setHighThinkingMode(enabled: Boolean) {
