@@ -27,6 +27,7 @@ interface IAppRepository {
     suspend fun insertFile(file: FileEntity): Long
     suspend fun insertFiles(files: List<FileEntity>)
     suspend fun updateFile(file: FileEntity)
+    suspend fun updateFiles(files: List<FileEntity>)
     suspend fun deleteFile(file: FileEntity)
     suspend fun deleteFileById(id: Long)
     suspend fun cleanAllJunk()

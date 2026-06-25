@@ -176,6 +176,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     fun smartGeminiSemanticSearch(query: String, onComplete: () -> Unit = {}) = fileScannerViewModel.smartGeminiSemanticSearch(query, onComplete)
     fun addLocalSimulatedFile(name: String, size: Long, mimeType: String, path: String) = fileScannerViewModel.addLocalSimulatedFile(name, size, mimeType, path)
     fun deleteRealFile(file: ScannedFile) = fileScannerViewModel.deleteRealFile(file)
+    fun deleteRealFilesBatch(context: Context, files: List<ScannedFile>, onComplete: (Boolean) -> Unit = {}) = fileScannerViewModel.deleteRealFilesBatch(context, files, onComplete)
     fun onSafDirectorySelected(context: Context, uri: Uri) = fileScannerViewModel.onSafDirectorySelected(context, uri)
     fun scanSafFiles(context: Context) = fileScannerViewModel.scanSafFiles(context)
     fun clearPendingDeleteIntent() = fileScannerViewModel.clearPendingDeleteIntent()

@@ -202,6 +202,7 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     override suspend fun insertFile(file: FileEntity): Long = fileDao.insertFile(file)
     override suspend fun insertFiles(files: List<FileEntity>) = fileDao.insertFiles(files)
     override suspend fun updateFile(file: FileEntity) = fileDao.updateFile(file)
+    override suspend fun updateFiles(files: List<FileEntity>) = fileDao.updateFiles(files)
     override suspend fun deleteFile(file: FileEntity) = fileDao.deleteFile(file)
     override suspend fun deleteFileById(id: Long) = fileDao.deleteFileById(id)
     override suspend fun cleanAllJunk() = fileDao.clearAllJunk()

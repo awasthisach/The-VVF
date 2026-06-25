@@ -2521,13 +2521,14 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                 confirmButton = {
                     Button(
                         onClick = {
-                            selectedRealFiles.forEach { file ->
-                                viewModel.deleteRealFile(file)
+                            viewModel.deleteRealFilesBatch(context, selectedRealFiles.toList()) { success ->
+                                if (success) {
+                                    Toast.makeText(context, "Deleted selected files.", Toast.LENGTH_SHORT).show()
+                                }
                             }
                             isRealMultiSelect = false
                             selectedRealFiles = emptySet()
                             showMultiDeleteDialog = false
-                            Toast.makeText(context, "Deleted selected files.", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) {

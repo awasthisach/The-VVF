@@ -62,6 +62,7 @@ class DuplicateCleanerViewModel(
                 
                 val groups = allFiles.groupBy { it.name + "_" + it.size }
                 
+                val filesToUpdate = mutableListOf<FileEntity>()
                 var duplicatesCount = 0
                 for ((_, fileList) in groups) {
                     if (fileList.size > 1) {
@@ -69,16 +70,20 @@ class DuplicateCleanerViewModel(
                             val file = fileList[index]
                             val shouldBeDuplicate = index > 0
                             if (file.isDuplicate != shouldBeDuplicate) {
-                                repository.updateFile(file.copy(isDuplicate = shouldBeDuplicate))
-                                duplicatesCount++
+                                filesToUpdate.add(file.copy(isDuplicate = shouldBeDuplicate))
+                                if (shouldBeDuplicate) duplicatesCount++
                             }
                         }
                     } else {
                         val file = fileList.firstOrNull()
                         if (file != null && file.isDuplicate) {
-                            repository.updateFile(file.copy(isDuplicate = false))
+                            filesToUpdate.add(file.copy(isDuplicate = false))
                         }
                     }
+                }
+
+                if (filesToUpdate.isNotEmpty()) {
+                    repository.updateFiles(filesToUpdate)
                 }
                 
                 _duplicateScanProgress.value = 0.8f

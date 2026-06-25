@@ -347,7 +347,18 @@ class FileScannerViewModel(
             }
 
             try {
-                val availableFiles = _realFiles.value
+                // Prevent OOM and context length limitations under massive datasets (e.g. 1,000,000 files)
+                // We pre-filter the files to a safe subset of up to 300 matching candidates or most recent files.
+                val searchKeywords = query.split(" ").filter { it.trim().length > 1 }
+                val availableFiles = if (searchKeywords.isEmpty()) {
+                    _realFiles.value.take(300)
+                } else {
+                    val matching = _realFiles.value.filter { file ->
+                        searchKeywords.any { kw -> file.name.contains(kw, ignoreCase = true) }
+                    }
+                    if (matching.isEmpty()) _realFiles.value.take(300) else matching.take(300)
+                }
+
                 val filesJsonArray = org.json.JSONArray()
                 availableFiles.forEachIndexed { index, file ->
                     val fileObj = org.json.JSONObject().apply {
@@ -825,6 +836,56 @@ class FileScannerViewModel(
 
     fun deleteRealFile(file: ScannedFile) {
         deletePhysicalFile(getApplication(), file)
+    }
+
+    fun deleteRealFilesBatch(context: Context, files: List<ScannedFile>, onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var success = false
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val mediaUris = files.map { it.uri }.filter { uri ->
+                        uri.scheme == "content" && uri.authority?.contains("media") == true
+                    }
+                    if (mediaUris.isNotEmpty()) {
+                        val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, mediaUris)
+                        _pendingDeleteIntent.value = pendingIntent
+                        success = false
+                    } else {
+                        files.forEach { file ->
+                            val uri = file.uri
+                            if (uri.scheme == "content") {
+                                DocumentFile.fromSingleUri(context, uri)?.delete()
+                            } else {
+                                File(file.path).delete()
+                            }
+                        }
+                        success = true
+                    }
+                } else {
+                    files.forEach { file ->
+                        val uri = file.uri
+                        if (uri.scheme == "content" && uri.authority?.contains("media") == true) {
+                            context.contentResolver.delete(uri, null, null)
+                        } else if (uri.scheme == "content") {
+                            DocumentFile.fromSingleUri(context, uri)?.delete()
+                        } else {
+                            File(file.path).delete()
+                        }
+                    }
+                    success = true
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Failed to delete files in batch", e)
+            }
+            if (success) {
+                val pathsToDelete = files.map { it.path }.toSet()
+                _realFiles.value = _realFiles.value.filter { it.path !in pathsToDelete }
+                _safTreeUri.value?.let { scanSafFiles(context) }
+            }
+            withContext(Dispatchers.Main) {
+                onComplete(success)
+            }
+        }
     }
 
     fun deletePhysicalFile(context: Context, file: ScannedFile, onComplete: (Boolean) -> Unit = {}) {

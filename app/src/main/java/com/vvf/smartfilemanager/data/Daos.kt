@@ -110,6 +110,9 @@ interface FileDao {
     @Update
     suspend fun updateFile(file: FileEntity)
 
+    @Update
+    suspend fun updateFiles(files: List<FileEntity>)
+
     @Delete
     suspend fun deleteFile(file: FileEntity)
 
