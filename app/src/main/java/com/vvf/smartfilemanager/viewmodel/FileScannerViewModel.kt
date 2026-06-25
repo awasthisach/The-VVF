@@ -342,7 +342,7 @@ class FileScannerViewModel(
         _realFileSearchQuery.value = query
     }
 
-    fun smartGeminiSemanticSearch(query: String, onComplete: () -> Unit = {}) {
+    fun smartGeminiSemanticSearch(apiKey: String, query: String, onComplete: () -> Unit = {}) {
         if (query.isBlank()) {
             _useSemanticResults.value = false
             _semanticResults.value = emptyList()
@@ -354,7 +354,6 @@ class FileScannerViewModel(
         _useSemanticResults.value = true
 
         viewModelScope.launch(Dispatchers.IO) {
-            val apiKey = BuildConfig.GEMINI_API_KEY
             if (apiKey.isEmpty() || apiKey == "YOUR_GEMINI_API_KEY") {
                 Log.e("FileScannerViewModel", "Gemini API Key is empty or invalid!")
                 val fallbackResults = _realFiles.value.filter {
