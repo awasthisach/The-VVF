@@ -1228,6 +1228,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
     val realFileSearchQuery by viewModel.realFileSearchQuery.collectAsStateWithLifecycle()
     val filteredRealFiles by viewModel.filteredRealFiles.collectAsStateWithLifecycle()
 
+    var selectedDetailFile by remember { mutableStateOf<ScannedFile?>(null) }
     var showSafeFolderDialog by remember { mutableStateOf(false) }
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     var browseSubTab by remember { mutableStateOf(0) } // 0: My Files, 1: Duplicates, 2: Simulated
@@ -1286,12 +1287,215 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
-                IconButton(onClick = { showSafeFolderDialog = true }) {
-                    Icon(
-                        imageVector = if (safeState is SafeFolderState.Unlocked) Icons.Filled.FolderSpecial else Icons.Filled.Lock,
-                        contentDescription = "Safe Vault",
-                        tint = MaterialTheme.colorScheme.secondary
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    var showHeaderSortMenu by remember { mutableStateOf(false) }
+                    val currentSortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
+                    
+                    Box {
+                        IconButton(
+                            onClick = { showHeaderSortMenu = true },
+                            modifier = Modifier.testTag("header_sort_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Sort,
+                                contentDescription = "Sort Files",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        
+                        DropdownMenu(
+                            expanded = showHeaderSortMenu,
+                            onDismissRequest = { showHeaderSortMenu = false }
+                        ) {
+                            Text(
+                                text = "Sort By Size | आकार",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Size: Largest First ⬇", 
+                                            fontWeight = if (currentSortOrder == SortOrder.SIZE_LARGEST) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.SIZE_LARGEST) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (currentSortOrder == SortOrder.SIZE_LARGEST) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.SIZE_LARGEST)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Size: Smallest First ⬆", 
+                                            fontWeight = if (currentSortOrder == SortOrder.SIZE_SMALLEST) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.SIZE_SMALLEST) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (currentSortOrder == SortOrder.SIZE_SMALLEST) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.SIZE_SMALLEST)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            Text(
+                                text = "Sort By Extension | प्रकार",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Extension: A-Z (Asc) 🔤", 
+                                            fontWeight = if (currentSortOrder == SortOrder.EXTENSION_ASC) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.EXTENSION_ASC) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (currentSortOrder == SortOrder.EXTENSION_ASC) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.EXTENSION_ASC)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Extension: Z-A (Desc) 🔤", 
+                                            fontWeight = if (currentSortOrder == SortOrder.EXTENSION_DESC) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.EXTENSION_DESC) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (currentSortOrder == SortOrder.EXTENSION_DESC) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.EXTENSION_DESC)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            Text(
+                                text = "More Sort Options",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Name: A-Z", 
+                                            fontWeight = if (currentSortOrder == SortOrder.NAME_ASC) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.NAME_ASC) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (currentSortOrder == SortOrder.NAME_ASC) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.NAME_ASC)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Name: Z-A", 
+                                            fontWeight = if (currentSortOrder == SortOrder.NAME_DESC) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.NAME_DESC) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (currentSortOrder == SortOrder.NAME_DESC) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.NAME_DESC)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Newest First", 
+                                            fontWeight = if (currentSortOrder == SortOrder.DATE_NEWEST) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.DATE_NEWEST) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (currentSortOrder == SortOrder.DATE_NEWEST) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.DATE_NEWEST)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Oldest First", 
+                                            fontWeight = if (currentSortOrder == SortOrder.DATE_OLDEST) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.DATE_OLDEST) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (currentSortOrder == SortOrder.DATE_OLDEST) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.DATE_OLDEST)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = { showSafeFolderDialog = true }) {
+                        Icon(
+                            imageVector = if (safeState is SafeFolderState.Unlocked) Icons.Filled.FolderSpecial else Icons.Filled.Lock,
+                            contentDescription = "Safe Vault",
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                    }
                 }
             }
 
@@ -1326,34 +1530,171 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                         Column(modifier = Modifier.fillMaxSize()) {
                             // Sort Order Select Row
                             val currentSortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
-                            Row(
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                ),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text(
-                                    text = "Sort:",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                SortOrder.values().forEach { order ->
-                                    val label = when (order) {
-                                        SortOrder.NAME_ASC -> "Name A-Z"
-                                        SortOrder.NAME_DESC -> "Name Z-A"
-                                        SortOrder.DATE_NEWEST -> "Newest"
-                                        SortOrder.DATE_OLDEST -> "Oldest"
-                                        SortOrder.SIZE_LARGEST -> "Largest"
-                                        SortOrder.SIZE_SMALLEST -> "Smallest"
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Sorting & Directory Management | सॉर्ट विकल्प",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        
+                                        // Reset/Default sort button
+                                        TextButton(
+                                            onClick = { viewModel.updateSortOrder(SortOrder.NAME_ASC) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Refresh,
+                                                contentDescription = "Reset",
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Reset", fontSize = 10.sp)
+                                        }
                                     }
-                                    FilterChip(
-                                        selected = currentSortOrder == order,
-                                        onClick = { viewModel.updateSortOrder(order) },
-                                        label = { Text(label, fontSize = 11.sp) }
-                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Size Toggle Button
+                                        val isSizeSelected = currentSortOrder == SortOrder.SIZE_LARGEST || currentSortOrder == SortOrder.SIZE_SMALLEST
+                                        val isSizeDesc = currentSortOrder == SortOrder.SIZE_LARGEST
+                                        
+                                        Button(
+                                            onClick = {
+                                                if (isSizeSelected) {
+                                                    // Toggle direction
+                                                    viewModel.updateSortOrder(if (isSizeDesc) SortOrder.SIZE_SMALLEST else SortOrder.SIZE_LARGEST)
+                                                } else {
+                                                    // Default to size largest (descending)
+                                                    viewModel.updateSortOrder(SortOrder.SIZE_LARGEST)
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (isSizeSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                                contentColor = if (isSizeSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                width = 1.dp,
+                                                color = if (isSizeSelected) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            modifier = Modifier.weight(1f).height(38.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isSizeSelected && isSizeDesc) Icons.Filled.ArrowDownward else Icons.Filled.ArrowUpward,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = if (isSizeSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Column(horizontalAlignment = Alignment.Start) {
+                                                Text("Size | आकार", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    text = if (isSizeSelected) (if (isSizeDesc) "Largest First" else "Smallest First") else "Not Active",
+                                                    fontSize = 8.sp,
+                                                    color = if (isSizeSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        // Extension Toggle Button
+                                        val isExtSelected = currentSortOrder == SortOrder.EXTENSION_ASC || currentSortOrder == SortOrder.EXTENSION_DESC
+                                        val isExtDesc = currentSortOrder == SortOrder.EXTENSION_DESC
+                                        
+                                        Button(
+                                            onClick = {
+                                                if (isExtSelected) {
+                                                    // Toggle direction
+                                                    viewModel.updateSortOrder(if (isExtDesc) SortOrder.EXTENSION_ASC else SortOrder.EXTENSION_DESC)
+                                                } else {
+                                                    // Default to alphabetical A-Z (ascending)
+                                                    viewModel.updateSortOrder(SortOrder.EXTENSION_ASC)
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (isExtSelected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surface,
+                                                contentColor = if (isExtSelected) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                width = 1.dp,
+                                                color = if (isExtSelected) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            modifier = Modifier.weight(1f).height(38.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isExtSelected && isExtDesc) Icons.Filled.ArrowDownward else Icons.Filled.ArrowUpward,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = if (isExtSelected) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.secondary
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Column(horizontalAlignment = Alignment.Start) {
+                                                Text("Extension | प्रकार", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    text = if (isExtSelected) (if (isExtDesc) "Z-A (Desc)" else "A-Z (Asc)") else "Not Active",
+                                                    fontSize = 8.sp,
+                                                    color = if (isExtSelected) MaterialTheme.colorScheme.onSecondary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Other traditional filters option in horizontal scroll
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("More:", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        SortOrder.values().forEach { order ->
+                                            if (order != SortOrder.SIZE_LARGEST && order != SortOrder.SIZE_SMALLEST &&
+                                                order != SortOrder.EXTENSION_ASC && order != SortOrder.EXTENSION_DESC) {
+                                                val label = when (order) {
+                                                    SortOrder.NAME_ASC -> "Name A-Z"
+                                                    SortOrder.NAME_DESC -> "Name Z-A"
+                                                    SortOrder.DATE_NEWEST -> "Newest"
+                                                    SortOrder.DATE_OLDEST -> "Oldest"
+                                                    else -> ""
+                                                }
+                                                if (label.isNotEmpty()) {
+                                                    FilterChip(
+                                                        selected = currentSortOrder == order,
+                                                        onClick = { viewModel.updateSortOrder(order) },
+                                                        label = { Text(label, fontSize = 9.sp) },
+                                                        modifier = Modifier.height(24.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -1726,7 +2067,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                                                 isRealMultiSelect = false
                                                             }
                                                         } else {
-                                                            Toast.makeText(context, "Long-press to select multiple files", Toast.LENGTH_SHORT).show()
+                                                            selectedDetailFile = file
                                                         }
                                                     },
                                                     onLongClick = {
@@ -1922,6 +2263,261 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                             Icon(Icons.Filled.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text("Delete")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Bottom Detail Panel for ScannedFile
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = selectedDetailFile != null,
+                            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                        ) {
+                            selectedDetailFile?.let { file ->
+                                val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+                                val annotatedPath = androidx.compose.ui.text.AnnotatedString(file.path)
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.5f))
+                                        .clickable { selectedDetailFile = null },
+                                    contentAlignment = Alignment.BottomCenter
+                                ) {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable(enabled = false) {}
+                                            .padding(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
+                                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(20.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(40.dp)
+                                                    .height(4.dp)
+                                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f), CircleShape)
+                                                    .align(Alignment.CenterHorizontally)
+                                            )
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "File Metadata Details | फ़ाइल विवरण",
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                IconButton(
+                                                    onClick = { selectedDetailFile = null },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                                    .padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                val detailIcon = when {
+                                                    file.mimeType.startsWith("image/") -> Icons.Filled.Image
+                                                    file.mimeType.startsWith("video/") -> Icons.Filled.Movie
+                                                    file.mimeType.startsWith("audio/") -> Icons.Filled.MusicNote
+                                                    else -> Icons.Filled.Description
+                                                }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(52.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = detailIcon,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                        modifier = Modifier.size(28.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(16.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = file.name,
+                                                        fontWeight = FontWeight.Bold,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = file.mimeType.substringAfter("/").uppercase(),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.secondary
+                                                    )
+                                                }
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            
+                                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.DataUsage,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Column {
+                                                        Text(text = "Size | आकार", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Text(text = viewModel.formatSize(file.size), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                                    }
+                                                }
+                                                
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Label,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Column {
+                                                        Text(text = "MIME Type", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Text(text = file.mimeType, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                                    }
+                                                }
+                                                
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.CalendarToday,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Column {
+                                                        Text(text = "Modified | संशोधित", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Text(text = viewModel.formatDate(file.dateModified), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                                    }
+                                                }
+                                                
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.Top
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Place,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp).padding(top = 2.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text("Location | पथ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Text(file.path, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                                    }
+                                                    IconButton(
+                                                        onClick = {
+                                                            clipboardManager.setText(annotatedPath)
+                                                            Toast.makeText(context, "Copied Path to clipboard!", Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        modifier = Modifier.size(36.dp)
+                                                    ) {
+                                                        Icon(Icons.Filled.ContentCopy, contentDescription = "Copy Path", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                                    }
+                                                }
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(20.dp))
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Button(
+                                                    onClick = {
+                                                        val fileEntity = FileEntity(
+                                                            id = 0,
+                                                            name = file.name,
+                                                            path = file.path,
+                                                            size = file.size,
+                                                            lastModified = file.dateModified,
+                                                            mimeType = file.mimeType,
+                                                            isLocal = true
+                                                        )
+                                                        viewModel.openFileInViewer(fileEntity)
+                                                        selectedDetailFile = null
+                                                    },
+                                                    modifier = Modifier.weight(1.2f),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                                ) {
+                                                    Icon(Icons.Filled.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("Open", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                }
+                                                
+                                                Button(
+                                                    onClick = {
+                                                        renameFileTarget = file
+                                                        renameFileNameInput = file.name
+                                                        selectedDetailFile = null
+                                                    },
+                                                    modifier = Modifier.weight(1f),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                                ) {
+                                                    Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("Rename", fontSize = 12.sp)
+                                                }
+                                                
+                                                Button(
+                                                    onClick = {
+                                                        realFileToDelete = file
+                                                        selectedDetailFile = null
+                                                    },
+                                                    modifier = Modifier.weight(1f),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                                                ) {
+                                                    Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("Delete", fontSize = 12.sp)
+                                                }
+                                            }
                                         }
                                     }
                                 }

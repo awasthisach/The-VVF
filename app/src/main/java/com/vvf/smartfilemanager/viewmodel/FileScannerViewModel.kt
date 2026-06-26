@@ -331,6 +331,8 @@ class FileScannerViewModel(
             SortOrder.DATE_OLDEST -> filtered.sortedBy { it.dateModified }
             SortOrder.SIZE_LARGEST -> filtered.sortedByDescending { it.size }
             SortOrder.SIZE_SMALLEST -> filtered.sortedBy { it.size }
+            SortOrder.EXTENSION_ASC -> filtered.sortedWith(compareBy<ScannedFile> { it.name.substringAfterLast('.', "").lowercase() }.thenBy { it.name.lowercase() })
+            SortOrder.EXTENSION_DESC -> filtered.sortedWith(compareByDescending<ScannedFile> { it.name.substringAfterLast('.', "").lowercase() }.thenBy { it.name.lowercase() })
         }
     }
     .flowOn(Dispatchers.Default)
@@ -1181,6 +1183,8 @@ enum class SortOrder {
     DATE_NEWEST,
     DATE_OLDEST,
     SIZE_LARGEST,
-    SIZE_SMALLEST
+    SIZE_SMALLEST,
+    EXTENSION_ASC,
+    EXTENSION_DESC
 }
 
