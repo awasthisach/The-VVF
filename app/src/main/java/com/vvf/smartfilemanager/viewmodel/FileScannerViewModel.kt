@@ -33,8 +33,6 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.io.File
 import com.vvf.smartfilemanager.BuildConfig
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 
 class FileScannerViewModel(
     application: Application,
