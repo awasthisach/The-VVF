@@ -60,4 +60,13 @@ interface IAppRepository {
         systemInstruction: String? = null,
         enableThinkingMode: Boolean = false
     ): Pair<String, String?>
+
+    // Trash System
+    val allTrashFiles: Flow<List<TrashEntity>>
+    suspend fun insertTrash(trash: TrashEntity): Long
+    suspend fun deleteTrash(trash: TrashEntity)
+    suspend fun deleteTrashById(id: Long)
+    suspend fun clearAllTrash()
+    suspend fun getTrashById(id: Long): TrashEntity?
+    suspend fun deleteTrashBeforeTimestamp(timestamp: Long)
 }

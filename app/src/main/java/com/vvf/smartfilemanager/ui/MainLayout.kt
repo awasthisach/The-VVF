@@ -1519,6 +1519,11 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                     onClick = { browseSubTab = 2 },
                     text = { Text("Simulated Files") }
                 )
+                Tab(
+                    selected = browseSubTab == 3,
+                    onClick = { browseSubTab = 3 },
+                    text = { Text("Recycle Bin") }
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -2183,6 +2188,13 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                                                 moveFileTarget = file
                                                             },
                                                             enabled = safTreeUri != null
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("🗑 Move to Trash") },
+                                                            onClick = {
+                                                                showMenu = false
+                                                                viewModel.fileScannerViewModel.moveToTrash(java.io.File(file.path), file.mimeType)
+                                                            }
                                                         )
                                                         DropdownMenuItem(
                                                             text = { Text("❌ Delete") },
@@ -2855,7 +2867,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
         }
 
         AnimatedVisibility(
-            visible = isMultiSelect && browseSubTab == 2,
+            visible = isMultiSelect && (browseSubTab == 0 || browseSubTab == 2),
             enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(250)) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(250)) + fadeOut(),
             modifier = Modifier
@@ -2871,45 +2883,91 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(12.dp)
                 ) {
-                    Text(
-                        text = "${selectedIds.size} Selected",
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${selectedIds.size} Selected",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { viewModel.selectAllLocalFiles(filteredFiles) }) {
-                            Text("Select All", fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = { viewModel.selectAllLocalFiles(filteredFiles) }) {
+                                Text("Select All", style = MaterialTheme.typography.labelMedium)
+                            }
+                            TextButton(onClick = { viewModel.fileScannerViewModel.inverseLocalSelection(filteredFiles) }) {
+                                Text("Inverse", style = MaterialTheme.typography.labelMedium)
+                            }
                         }
+                    }
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Move to Safe (Move action)
                         IconButton(
                             onClick = { viewModel.moveSelectedToSafe(selectedIds) { viewModel.clearLocalSelection() } },
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                                .testTag("multi_select_move_safe")
                         ) {
                             Icon(Icons.Filled.Lock, "Move to safe", tint = MaterialTheme.colorScheme.primary)
                         }
 
+                        // Move to Trash (Trash action)
+                        IconButton(
+                            onClick = { viewModel.fileScannerViewModel.trashSelectedFiles(context, selectedIds) },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f))
+                        ) {
+                            Icon(Icons.Filled.DeleteSweep, "Move to Trash", tint = MaterialTheme.colorScheme.secondary)
+                        }
+
+                        // Share action
+                        IconButton(
+                            onClick = { viewModel.fileScannerViewModel.shareSelectedFiles(context, selectedIds) },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f))
+                        ) {
+                            Icon(Icons.Filled.Share, "Share", tint = MaterialTheme.colorScheme.tertiary)
+                        }
+
+                        // Compress ZIP action
+                        IconButton(
+                            onClick = { viewModel.fileScannerViewModel.compressSelectedToZip(context, selectedIds) },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f))
+                        ) {
+                            Icon(Icons.Filled.Inventory, "Compress to ZIP", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+
+                        // Delete Forever action
                         IconButton(
                             onClick = { viewModel.deleteLocalFilesByIds(selectedIds) },
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
-                                .testTag("multi_select_delete")
                         ) {
-                            Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Filled.Delete, "Delete Forever", tint = MaterialTheme.colorScheme.error)
                         }
 
+                        // Close/Clear selection
                         IconButton(
                             onClick = { viewModel.clearLocalSelection() },
                             modifier = Modifier
@@ -3037,6 +3095,156 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                 }
             }
         }
+
+                /*
+                    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "Recycle Bin Preferences | कचरा पेटी सेटिंग्स",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Auto Purge Older Than:", style = MaterialTheme.typography.bodyMedium)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        listOf(30, 60, 90, -1).forEach { days ->
+                                            val label = if (days == -1) "Never" else "$days d"
+                                            FilterChip(
+                                                selected = autoPurgeDays == days,
+                                                onClick = { viewModel.updateTrashCleanupDays(days) },
+                                                label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Trash Items (${trashFiles.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (trashFiles.isNotEmpty()) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = { viewModel.restoreAllTrash() }) {
+                                        Icon(Icons.Filled.RestorePage, "Restore All", modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Restore All")
+                                    }
+                                    Button(
+                                        onClick = { viewModel.emptyRecycleBin() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Icon(Icons.Filled.DeleteForever, "Empty Bin", modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Empty Bin")
+                                    }
+                                }
+                            }
+                        }
+
+                        if (trashFiles.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Filled.DeleteOutline,
+                                        contentDescription = "Empty Bin",
+                                        modifier = Modifier.size(64.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Your Recycle Bin is empty!", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(trashFiles) { trash ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                val displayName = trash.originalPath.substringAfterLast('/')
+                                                Text(
+                                                    text = displayName,
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = "Original: ${trash.originalPath}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                    modifier = Modifier.padding(top = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = viewModel.formatSize(trash.size),
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    Text(
+                                                        text = "Deleted: ${viewModel.formatDate(trash.deletedAt)}",
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                            Row {
+                                                IconButton(onClick = { viewModel.restoreFile(trash) }) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Restore,
+                                                        contentDescription = "Restore File",
+                                                        tint = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                                IconButton(onClick = { viewModel.deleteForever(trash) }) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.DeleteForever,
+                                                        contentDescription = "Delete Forever",
+                                                        tint = MaterialTheme.colorScheme.error
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }*/
 
         // Floating Action Button to Import Simulated Files directly
         if (browseSubTab == 2) {

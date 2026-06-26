@@ -51,3 +51,13 @@ data class ChatMessageEntity(
     val isThinking: Boolean = false,
     val thinkingProcess: String? = null
 )
+
+@Entity(tableName = "trash")
+data class TrashEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val originalPath: String,
+    val trashPath: String,
+    val deletedAt: Long,
+    val size: Long,
+    val mimeType: String
+)

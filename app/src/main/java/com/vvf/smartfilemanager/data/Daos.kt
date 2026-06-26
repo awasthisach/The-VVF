@@ -205,3 +205,30 @@ interface ChatMessageDao {
     @Query("DELETE FROM chat_messages")
     suspend fun clearHistory()
 }
+
+@Dao
+interface TrashDao {
+    @Query("SELECT * FROM trash ORDER BY deletedAt DESC")
+    fun getAllTrash(): Flow<List<TrashEntity>>
+
+    @Query("SELECT * FROM trash ORDER BY deletedAt DESC")
+    suspend fun getAllTrashList(): List<TrashEntity>
+
+    @Query("SELECT * FROM trash WHERE id = :id LIMIT 1")
+    suspend fun getTrashById(id: Long): TrashEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrash(trash: TrashEntity): Long
+
+    @Delete
+    suspend fun deleteTrash(trash: TrashEntity)
+
+    @Query("DELETE FROM trash WHERE id = :id")
+    suspend fun deleteTrashById(id: Long)
+
+    @Query("DELETE FROM trash")
+    suspend fun clearAllTrash()
+
+    @Query("DELETE FROM trash WHERE deletedAt < :timestamp")
+    suspend fun deleteTrashBeforeTimestamp(timestamp: Long)
+}

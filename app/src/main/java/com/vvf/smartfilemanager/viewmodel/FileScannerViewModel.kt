@@ -54,14 +54,19 @@ class FileScannerViewModel(
     private val _selectedFolderFilter = MutableStateFlow<String?>(null)
     val selectedFolderFilter: StateFlow<String?> = _selectedFolderFilter.asStateFlow()
 
+    private val _trashCleanupDays = MutableStateFlow(30)
+    val trashCleanupDays: StateFlow<Int> = _trashCleanupDays.asStateFlow()
+
     init {
         val prefs = application.getSharedPreferences("smart_file_manager_prefs", Context.MODE_PRIVATE)
         _safTreeUri.value = prefs.getString("saf_tree_uri", null)
         val savedPinned = prefs.getStringSet("pinned_directories", setOf("Downloads", "Documents", "Pictures")) ?: setOf("Downloads", "Documents", "Pictures")
         _pinnedDirectories.value = savedPinned
+        _trashCleanupDays.value = prefs.getInt("trash_cleanup_days", 30)
         _safTreeUri.value?.let {
             scanSafFiles(application)
         }
+        runAutoCleanup()
     }
 
     fun togglePinnedDirectory(directory: String) {
@@ -977,6 +982,105 @@ class FileScannerViewModel(
         _isMultiSelectMode.value = false
     }
 
+    fun inverseLocalSelection(filesList: List<FileEntity>) {
+        val current = _selectedLocalFileIds.value
+        val allIds = filesList.map { it.id }.toSet()
+        _selectedLocalFileIds.value = allIds.filter { !current.contains(it) }.toSet()
+        _isMultiSelectMode.value = _selectedLocalFileIds.value.isNotEmpty()
+    }
+
+    fun trashSelectedFiles(context: Context, ids: Set<Long>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val files = repository.allLocalNonSafeFiles.first()
+            val selected = files.filter { ids.contains(it.id) }
+            selected.forEach { file ->
+                moveToTrash(File(file.path), file.mimeType)
+            }
+            clearLocalSelection()
+        }
+    }
+
+    fun shareSelectedFiles(context: Context, ids: Set<Long>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val files = repository.allLocalNonSafeFiles.first()
+            val selected = files.filter { ids.contains(it.id) }
+            if (selected.isEmpty()) return@launch
+            
+            val uris = ArrayList<Uri>()
+            selected.forEach { file ->
+                try {
+                    val f = File(file.path)
+                    val u = androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.provider",
+                        f
+                    )
+                    uris.add(u)
+                } catch (e: Exception) {
+                    Log.e("FileScannerViewModel", "Failed to get URI for sharing file: ${file.path}", e)
+                }
+            }
+            
+            if (uris.isNotEmpty()) {
+                val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "*/*"
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "Share ${selected.size} Files"))
+            }
+        }
+    }
+
+    fun compressSelectedToZip(context: Context, ids: Set<Long>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val files = repository.allLocalNonSafeFiles.first()
+            val selected = files.filter { ids.contains(it.id) }
+            if (selected.isEmpty()) return@launch
+            
+            val firstFile = File(selected.first().path)
+            val parentDir = firstFile.parentFile ?: File(context.getExternalFilesDir(null), "Compressed")
+            if (!parentDir.exists()) parentDir.mkdirs()
+            
+            val zipFile = File(parentDir, "archive_${System.currentTimeMillis()}.zip")
+            try {
+                java.util.zip.ZipOutputStream(java.io.FileOutputStream(zipFile)).use { zos ->
+                    selected.forEach { file ->
+                        val f = File(file.path)
+                        if (f.exists() && f.isFile) {
+                            val entry = java.util.zip.ZipEntry(f.name)
+                            zos.putNextEntry(entry)
+                            f.inputStream().use { input ->
+                                input.copyTo(zos)
+                            }
+                            zos.closeEntry()
+                        }
+                    }
+                }
+                
+                val zipEntity = FileEntity(
+                    name = zipFile.name,
+                    path = zipFile.absolutePath,
+                    size = zipFile.length(),
+                    lastModified = zipFile.lastModified(),
+                    mimeType = "application/zip",
+                    isLocal = true,
+                    isSafe = false,
+                    isDuplicate = false,
+                    isJunk = false
+                )
+                repository.insertFile(zipEntity)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "Zip created successfully: ${zipFile.name}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Failed to compress to zip", e)
+            } finally {
+                clearLocalSelection()
+            }
+        }
+    }
+
     fun updateLocalSearchQuery(query: String) {
         _localSearchQuery.value = query
     }
@@ -1174,6 +1278,168 @@ class FileScannerViewModel(
     fun formatDate(timestamp: Long): String {
         val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
         return sdf.format(java.util.Date(timestamp))
+    }
+
+    // --- Trash / Recycle Bin Flow & Actions ---
+    val allTrashFiles: StateFlow<List<TrashEntity>> = repository.allTrashFiles
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun updateTrashCleanupDays(days: Int) {
+        _trashCleanupDays.value = days
+        val prefs = getApplication<Application>().getSharedPreferences("smart_file_manager_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putInt("trash_cleanup_days", days).apply()
+        runAutoCleanup()
+    }
+
+    private fun runAutoCleanup() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val days = _trashCleanupDays.value
+            if (days > 0) {
+                val expiryTime = System.currentTimeMillis() - (days.toLong() * 24L * 60L * 60L * 1000L)
+                val trashList = repository.allTrashFiles.first()
+                trashList.forEach { trash ->
+                    if (trash.deletedAt < expiryTime) {
+                        try {
+                            File(trash.trashPath).delete()
+                        } catch (e: Exception) {
+                            Log.e("FileScannerViewModel", "Failed to delete expired trash file", e)
+                        }
+                    }
+                }
+                repository.deleteTrashBeforeTimestamp(expiryTime)
+            }
+        }
+    }
+
+    fun moveToTrash(file: File, mimeType: String = "*/*") {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val mediaDir = File(getApplication<Application>().getExternalFilesDir(null)?.absolutePath?.replace("data", "media")?.replace("/files", "") ?: "/sdcard/Android/media/com.vvf.smartfilemanager")
+                if (!mediaDir.exists()) {
+                    mediaDir.mkdirs()
+                }
+                val trashDir = File(mediaDir, ".trash")
+                if (!trashDir.exists()) {
+                    trashDir.mkdirs()
+                }
+                val destFile = File(trashDir, "${System.currentTimeMillis()}_${file.name}")
+                if (file.renameTo(destFile) || copyFilePhysical(file, destFile)) {
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                    val trash = TrashEntity(
+                        originalPath = file.absolutePath,
+                        trashPath = destFile.absolutePath,
+                        deletedAt = System.currentTimeMillis(),
+                        size = destFile.length(),
+                        mimeType = mimeType
+                    )
+                    repository.insertTrash(trash)
+                    
+                    // Delete from database list if matches
+                    val dbEntities = repository.allLocalNonSafeFiles.first()
+                    val match = dbEntities.find { it.path == file.absolutePath }
+                    if (match != null) {
+                        repository.deleteFile(match)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Error moving file to trash: ", e)
+            }
+        }
+    }
+
+    private fun copyFilePhysical(src: File, dst: File): Boolean {
+        return try {
+            src.inputStream().use { input ->
+                dst.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun restoreFile(trash: TrashEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val src = File(trash.trashPath)
+                val dest = File(trash.originalPath)
+                dest.parentFile?.mkdirs()
+                if (src.renameTo(dest) || copyFilePhysical(src, dest)) {
+                    if (src.exists()) {
+                        src.delete()
+                    }
+                    repository.deleteTrash(trash)
+                    val entity = FileEntity(
+                        name = dest.name,
+                        path = dest.absolutePath,
+                        size = dest.length(),
+                        lastModified = dest.lastModified(),
+                        mimeType = trash.mimeType,
+                        isLocal = true,
+                        isSafe = false,
+                        isDuplicate = false,
+                        isJunk = false
+                    )
+                    repository.insertFile(entity)
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Error restoring file: ", e)
+            }
+        }
+    }
+
+    fun restoreAllTrash() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = repository.allTrashFiles.first()
+            list.forEach { trash ->
+                val src = File(trash.trashPath)
+                val dest = File(trash.originalPath)
+                dest.parentFile?.mkdirs()
+                if (src.renameTo(dest) || copyFilePhysical(src, dest)) {
+                    if (src.exists()) {
+                        src.delete()
+                    }
+                    repository.deleteTrash(trash)
+                    val entity = FileEntity(
+                        name = dest.name,
+                        path = dest.absolutePath,
+                        size = dest.length(),
+                        lastModified = dest.lastModified(),
+                        mimeType = trash.mimeType,
+                        isLocal = true,
+                        isSafe = false,
+                        isDuplicate = false,
+                        isJunk = false
+                    )
+                    repository.insertFile(entity)
+                }
+            }
+        }
+    }
+
+    fun deleteForever(trash: TrashEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                File(trash.trashPath).delete()
+                repository.deleteTrash(trash)
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Error deleting forever: ", e)
+            }
+        }
+    }
+
+    fun emptyRecycleBin() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = repository.allTrashFiles.first()
+            list.forEach { trash ->
+                File(trash.trashPath).delete()
+            }
+            repository.clearAllTrash()
+        }
     }
 }
 

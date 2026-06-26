@@ -15,6 +15,7 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     private val categoryDao = db.categoryDao()
     private val secureStateDao = db.secureStateDao()
     private val chatDao = db.chatMessageDao()
+    private val trashDao = db.trashDao()
 
     // Flow Accessors
     override val allLocalNonSafeFiles: Flow<List<FileEntity>> = fileDao.getLocalNonSafeFiles()
@@ -310,5 +311,32 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
             Log.e("AppRepository", "Error calling AI provider: ", e)
             return Pair("Failed via provider delegation: ${e.localizedMessage ?: e.message}", null)
         }
+    }
+
+    // Trash System Implementation
+    override val allTrashFiles: Flow<List<TrashEntity>> = trashDao.getAllTrash()
+
+    override suspend fun insertTrash(trash: TrashEntity): Long = withContext(Dispatchers.IO) {
+        trashDao.insertTrash(trash)
+    }
+
+    override suspend fun deleteTrash(trash: TrashEntity) = withContext(Dispatchers.IO) {
+        trashDao.deleteTrash(trash)
+    }
+
+    override suspend fun deleteTrashById(id: Long) = withContext(Dispatchers.IO) {
+        trashDao.deleteTrashById(id)
+    }
+
+    override suspend fun clearAllTrash() = withContext(Dispatchers.IO) {
+        trashDao.clearAllTrash()
+    }
+
+    override suspend fun getTrashById(id: Long): TrashEntity? = withContext(Dispatchers.IO) {
+        trashDao.getTrashById(id)
+    }
+
+    override suspend fun deleteTrashBeforeTimestamp(timestamp: Long) = withContext(Dispatchers.IO) {
+        trashDao.deleteTrashBeforeTimestamp(timestamp)
     }
 }

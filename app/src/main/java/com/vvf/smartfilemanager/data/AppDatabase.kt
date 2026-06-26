@@ -10,9 +10,10 @@ import androidx.room.RoomDatabase
         FileEntity::class,
         CategoryEntity::class,
         SecureStateEntity::class,
-        ChatMessageEntity::class
+        ChatMessageEntity::class,
+        TrashEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -20,6 +21,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun categoryDao(): CategoryDao
     abstract fun secureStateDao(): SecureStateDao
     abstract fun chatMessageDao(): ChatMessageDao
+    abstract fun trashDao(): TrashDao
 
     companion object {
         @Volatile
