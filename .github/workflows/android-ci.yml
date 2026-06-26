@@ -13,6 +13,8 @@ jobs:
   build-and-test:
     name: Build, Test & Package
     runs-on: ubuntu-latest
+    outputs:
+      has_sign_keys: ${{ steps.check_credentials.outputs.has_sign_keys }}
     env:
       STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -53,9 +55,11 @@ jobs:
       run: |
         if [ ! -z "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ] && [ ! -z "${{ secrets.STORE_PASSWORD }}" ] && [ ! -z "${{ secrets.KEY_PASSWORD }}" ]; then
           echo "HAS_SIGN_KEYS=true" >> $GITHUB_ENV
+          echo "has_sign_keys=true" >> $GITHUB_OUTPUT
           echo "Signing credentials successfully detected."
         else
           echo "HAS_SIGN_KEYS=false" >> $GITHUB_ENV
+          echo "has_sign_keys=false" >> $GITHUB_OUTPUT
           echo "No signing secrets detected. Falling back to debug builds for safety."
         fi
 
@@ -134,9 +138,7 @@ jobs:
         path: build-outputs/
 
     - name: Download Release Artifacts (If Available)
-      # We try to load release packages. If they exist, we'll download them.
-      # If not, we'll gracefully proceed with uploading debug/test APK to github releases.
-      continue-on-error: true
+      if: needs.build-and-test.outputs.has_sign_keys == 'true'
       uses: actions/download-artifact@v4
       with:
         name: app-release-packages
@@ -164,6 +166,7 @@ jobs:
         files: |
           build-outputs/**/*.apk
           build-outputs/**/*.aab
+        fail_on_unmatched_files: false
         body_path: .github/workflows/release_notes.md
         draft: false
       env:
