@@ -840,27 +840,160 @@ fun CleanScreen(viewModel: SmartViewModel) {
                                 Text("Dismiss")
                             }
                         } else {
+                            var selectedDupIds by remember(dups) { mutableStateOf(dups.map { it.id }.toSet()) }
+                            val totalSize = dups.sumOf { it.size }
+                            val selectedSize = dups.filter { selectedDupIds.contains(it.id) }.sumOf { it.size }
+
                             Icon(Icons.Filled.FolderSpecial, "Duplicates", modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.secondary)
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("Found ${dups.size} duplicate items!", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
-                            Text("Freeable space: ${viewModel.formatSize(dups.sumOf { it.size })}", fontSize = 12.sp)
+                            Text(
+                                "Selected: ${selectedDupIds.size} files (${viewModel.formatSize(selectedSize)} / ${viewModel.formatSize(totalSize)})",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
 
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Select All header helper row
+                            val isAllSelected = selectedDupIds.size == dups.size
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Select duplicate copies to delete:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton(
+                                    onClick = {
+                                        selectedDupIds = if (isAllSelected) emptySet() else dups.map { it.id }.toSet()
+                                    }
+                                ) {
+                                    Text(if (isAllSelected) "Deselect All" else "Select All", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
                             LazyColumn(
-                                modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 240.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 items(dups, key = { "dup_${it.id}" }) { file ->
+                                    val isSelected = selectedDupIds.contains(file.id)
+                                    val fileExtension = file.name.substringAfterLast('.', "").uppercase()
+                                    val fileTypeLabel = if (fileExtension.isNotEmpty()) fileExtension else {
+                                        if (file.mimeType.contains("/")) file.mimeType.substringAfter("/") else "FILE"
+                                    }
+
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                            .background(
+                                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                                                       else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                                shape = RoundedCornerShape(12.dp)
+                                            )
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                                       else Color.Transparent,
+                                                shape = RoundedCornerShape(12.dp)
+                                            )
+                                            .clickable {
+                                                selectedDupIds = if (isSelected) {
+                                                    selectedDupIds - file.id
+                                                } else {
+                                                    selectedDupIds + file.id
+                                                }
+                                            }
                                             .padding(8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(file.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
-                                        Text(viewModel.formatSize(file.size), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Checkbox(
+                                            checked = isSelected,
+                                            onCheckedChange = { checked ->
+                                                selectedDupIds = if (checked == true) {
+                                                    selectedDupIds + file.id
+                                                } else {
+                                                    selectedDupIds - file.id
+                                                }
+                                            },
+                                            colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                        )
+
+                                        Spacer(modifier = Modifier.width(4.dp))
+
+                                        // Beautiful File Type Indicator Badge
+                                        Box(
+                                            modifier = Modifier
+                                                .background(
+                                                    color = when {
+                                                        file.mimeType.startsWith("image/") -> Color(0xFF0EA5E9).copy(alpha = 0.2f)
+                                                        file.mimeType.startsWith("video/") -> Color(0xFFF43F5E).copy(alpha = 0.2f)
+                                                        file.mimeType.startsWith("audio/") -> Color(0xFF8B5CF6).copy(alpha = 0.2f)
+                                                        file.mimeType.contains("pdf") -> Color(0xFFEF4444).copy(alpha = 0.2f)
+                                                        else -> Color(0xFF64748B).copy(alpha = 0.2f)
+                                                    },
+                                                    shape = RoundedCornerShape(6.dp)
+                                                )
+                                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = fileTypeLabel.take(4),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = when {
+                                                    file.mimeType.startsWith("image/") -> Color(0xFF0284C7)
+                                                    file.mimeType.startsWith("video/") -> Color(0xFFE11D48)
+                                                    file.mimeType.startsWith("audio/") -> Color(0xFF7C3AED)
+                                                    file.mimeType.contains("pdf") -> Color(0xFFDC2626)
+                                                    else -> Color(0xFF475569)
+                                                }
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = file.name,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = viewModel.formatSize(file.size),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text("•", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                                                Text(
+                                                    text = file.path.substringBeforeLast("/", ""),
+                                                    fontSize = 8.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                        }
+
+                                        // Eye View Button
+                                        IconButton(
+                                            onClick = { viewModel.openFileInViewer(file) },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Visibility,
+                                                contentDescription = "View File",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -872,14 +1005,15 @@ fun CleanScreen(viewModel: SmartViewModel) {
                                 }
                                 Button(
                                     onClick = {
-                                        viewModel.deleteLocalFilesByIds(dups.map { it.id }.toSet())
+                                        viewModel.deleteLocalFilesByIds(selectedDupIds)
                                         viewModel.dismissDuplicateScanner()
-                                        Toast.makeText(context, "Duplicates removed!", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "${selectedDupIds.size} duplicates removed!", Toast.LENGTH_SHORT).show()
                                     },
+                                    enabled = selectedDupIds.isNotEmpty(),
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                                     modifier = Modifier.weight(1.3f)
                                 ) {
-                                    Text("Remove All")
+                                    Text("Remove Selected")
                                 }
                             }
                         }
@@ -7134,7 +7268,7 @@ fun StorageCleanerPanel(
                                                 Text(file.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 Text(file.path, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 Spacer(modifier = Modifier.height(2.dp))
-                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                                     Text(viewModel.formatSize(file.size), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                                                     Text("•", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
                                                     Text(
@@ -7142,7 +7276,23 @@ fun StorageCleanerPanel(
                                                         fontSize = 10.sp,
                                                         color = MaterialTheme.colorScheme.secondary
                                                     )
+                                                    // Display file extension / format nicely
+                                                    val ext = file.name.substringAfterLast('.', "").uppercase()
+                                                    if (ext.isNotEmpty()) {
+                                                        Text("•", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
+                                                        Text(ext, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                                    }
                                                 }
+                                            }
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            IconButton(
+                                                onClick = { viewModel.openFileInViewer(file) }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Visibility,
+                                                    contentDescription = "View File",
+                                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                                )
                                             }
                                         }
                                     }
