@@ -18,6 +18,11 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val geminiApiKey = (project.findProperty("GEMINI_API_KEY")?.toString()?.takeIf { it.isNotBlank() }
+            ?: System.getenv("GEMINI_API_KEY")?.takeIf { it.isNotBlank() }
+            ?: "")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
 
     buildTypes {
@@ -54,6 +59,7 @@ android {
 secrets {
     propertiesFileName = ".env"
     defaultPropertiesFileName = ".env.example"
+    ignoreList.add("GEMINI_API_KEY")
 }
 
 dependencies {
