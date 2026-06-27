@@ -4,10 +4,14 @@
     <!-- Network (for optional Gemini AI chat) -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Biometrics -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
     <!-- Storage — Android 13+ (API 33+) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
 
     <!-- Storage — Android 9–12 (API 28–32) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"

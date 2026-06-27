@@ -87,6 +87,13 @@ class DuplicateCleanerViewModel(
         }
     }
 
+    private val _pendingDeleteIntent = MutableStateFlow<android.app.PendingIntent?>(null)
+    val pendingDeleteIntent: StateFlow<android.app.PendingIntent?> = _pendingDeleteIntent.asStateFlow()
+
+    fun clearPendingDeleteIntent() {
+        _pendingDeleteIntent.value = null
+    }
+
     fun dismissDuplicateScanner() {
         _duplicateScannerState.value = ScannerState.Idle
         _duplicateScanProgress.value = 0f
@@ -95,9 +102,47 @@ class DuplicateCleanerViewModel(
     fun deleteSelectedDuplicates() {
         viewModelScope.launch {
             Log.d("DuplicateCleanerVM", "Deleting selected duplicates [StructuredLog: { event: \"duplicate_delete_start\" }]")
-            duplicateFiles.value.filter { it.isDuplicate }.forEach { file ->
-                repository.deleteFile(file)
+            val selected = duplicateFiles.value.filter { it.isDuplicate }
+            if (selected.isEmpty()) return@launch
+
+            val mediaUris = mutableListOf<android.net.Uri>()
+
+            selected.forEach { fileEntity ->
+                val contentUri = repository.getUriForPath(getApplication(), fileEntity.path)
+                if (contentUri != null) {
+                    mediaUris.add(contentUri)
+                } else {
+                    // Physical deletion for local files not in MediaStore
+                    try {
+                        val file = java.io.File(fileEntity.path)
+                        if (file.exists()) {
+                            file.delete()
+                        }
+                    } catch (e: Exception) {
+                        Log.e("DuplicateCleanerVM", "Failed to delete direct file ${fileEntity.path}", e)
+                    }
+                }
+                repository.deleteFileById(fileEntity.id)
             }
+
+            if (mediaUris.isNotEmpty()) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    val pendingIntent = android.provider.MediaStore.createDeleteRequest(
+                        getApplication<Application>().contentResolver,
+                        mediaUris
+                    )
+                    _pendingDeleteIntent.value = pendingIntent
+                } else {
+                    mediaUris.forEach { uri ->
+                        try {
+                            getApplication<Application>().contentResolver.delete(uri, null, null)
+                        } catch (e: Exception) {
+                            Log.e("DuplicateCleanerVM", "Failed to delete Uri pre-R: $uri", e)
+                        }
+                    }
+                }
+            }
+
             _duplicateScannerState.value = ScannerState.Idle
             Log.i("DuplicateCleanerVM", "Duplicates deleted successfully [StructuredLog: { event: \"duplicate_delete_success\" }]")
         }

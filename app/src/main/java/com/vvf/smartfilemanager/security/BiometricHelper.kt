@@ -38,4 +38,45 @@ object BiometricHelper {
             android.util.Log.e("BiometricHelper", "Failed to show biometric prompt", e)
         }
     }
+
+    fun showBiometricPromptSecure(
+        activity: FragmentActivity,
+        cryptoObject: BiometricPrompt.CryptoObject,
+        onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        try {
+            val executor = ContextCompat.getMainExecutor(activity)
+            val biometricPrompt = BiometricPrompt(
+                activity,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        super.onAuthenticationSucceeded(result)
+                        activity.runOnUiThread {
+                            onSuccess(result)
+                        }
+                    }
+
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        super.onAuthenticationError(errorCode, errString)
+                        activity.runOnUiThread {
+                            onError(errString.toString())
+                        }
+                    }
+                }
+            )
+
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock Safe Folder")
+                .setSubtitle("Authenticate to unlock cryptographically")
+                .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                .build()
+
+            biometricPrompt.authenticate(promptInfo, cryptoObject)
+        } catch (e: Exception) {
+            android.util.Log.e("BiometricHelper", "Failed to show biometric prompt secure", e)
+            onError(e.localizedMessage ?: "Unknown error")
+        }
+    }
 }

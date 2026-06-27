@@ -1406,7 +1406,47 @@ class FileScannerViewModel(
     fun deleteSelectedStorageFiles() {
         viewModelScope.launch {
             val selected = _storageSelectedFileIds.value
-            selected.forEach { id -> repository.deleteFileById(id) }
+            if (selected.isEmpty()) return@launch
+
+            val files = repository.getFilesByIds(selected.toList())
+            val mediaUris = mutableListOf<android.net.Uri>()
+
+            files.forEach { fileEntity ->
+                val contentUri = repository.getUriForPath(getApplication(), fileEntity.path)
+                if (contentUri != null) {
+                    mediaUris.add(contentUri)
+                } else {
+                    // Physical deletion for local files not in MediaStore
+                    try {
+                        val file = java.io.File(fileEntity.path)
+                        if (file.exists()) {
+                            file.delete()
+                        }
+                    } catch (e: Exception) {
+                        Log.e("FileScannerViewModel", "Failed to delete direct file ${fileEntity.path}", e)
+                    }
+                }
+                repository.deleteFileById(fileEntity.id)
+            }
+
+            if (mediaUris.isNotEmpty()) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    val pendingIntent = android.provider.MediaStore.createDeleteRequest(
+                        getApplication<android.app.Application>().contentResolver,
+                        mediaUris
+                    )
+                    _pendingDeleteIntent.value = pendingIntent
+                } else {
+                    mediaUris.forEach { uri ->
+                        try {
+                            getApplication<android.app.Application>().contentResolver.delete(uri, null, null)
+                        } catch (e: Exception) {
+                            Log.e("FileScannerViewModel", "Failed to delete Uri pre-R: $uri", e)
+                        }
+                    }
+                }
+            }
+
             _storageSelectedFileIds.value = emptySet()
         }
     }

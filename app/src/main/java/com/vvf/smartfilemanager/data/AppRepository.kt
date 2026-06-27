@@ -2,11 +2,16 @@ package com.vvf.smartfilemanager.data
 
 import android.content.Context
 import android.util.Log
+import android.content.ContentUris
+import android.net.Uri
+import android.provider.MediaStore
+import android.os.Build
+import android.content.ContentValues
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
-import androidx.room.withTransaction
 import kotlinx.coroutines.flow.firstOrNull
+import androidx.room.withTransaction
 import java.io.File
 
 class AppRepository(private val db: AppDatabase) : IAppRepository {
@@ -39,25 +44,160 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     override val mediaCount: Flow<Int> = fileDao.getMediaCount()
     override val mediaTotalSize: Flow<Long> = fileDao.getMediaTotalSize()
 
-    private fun calculateFileSha256(file: File): String? {
-        if (!file.exists() || !file.isFile) return null
-        return try {
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buffer = ByteArray(8 * 1024)
-                var bytesRead = input.read(buffer)
-                while (bytesRead != -1) {
-                    digest.update(buffer, 0, bytesRead)
-                    bytesRead = input.read(buffer)
+    override fun getUriForPath(context: Context, path: String): Uri? {
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns.DATA} = ?"
+        val selectionArgs = arrayOf(path)
+        val uris = listOf(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Files.getContentUri("external")
+        )
+        for (uri in uris) {
+            try {
+                context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                        if (idIndex != -1) {
+                            val id = cursor.getLong(idIndex)
+                            return ContentUris.withAppendedId(uri, id)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore and try next URI
+            }
+        }
+        return null
+    }
+
+    private fun getPathFromUri(context: Context, uri: Uri): String? {
+        val projection = arrayOf(MediaStore.MediaColumns.DATA)
+        try {
+            context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val dataIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                    if (dataIndex != -1) {
+                        return cursor.getString(dataIndex)
+                    }
                 }
             }
-            digest.digest().joinToString("") { "%02x".format(it) }
         } catch (e: Exception) {
+            // Ignore
+        }
+        return null
+    }
+
+    private fun getMediaStoreUriForRestore(context: Context, name: String, mimeType: String, originalPath: String): Uri? {
+        val contentResolver = context.contentResolver
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if (mimeType.startsWith("image/")) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/")
+                } else if (mimeType.startsWith("video/")) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Movies/")
+                } else if (mimeType.startsWith("audio/")) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Music/")
+                } else {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Documents/")
+                }
+            }
+        }
+        val targetUri = when {
+            mimeType.startsWith("image/") -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            mimeType.startsWith("video/") -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            mimeType.startsWith("audio/") -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+            else -> MediaStore.Files.getContentUri("external")
+        }
+        return try {
+            contentResolver.insert(targetUri, contentValues)
+        } catch (e: Exception) {
+            Log.e("AppRepository", "Error inserting into MediaStore: $name", e)
             null
         }
     }
 
-    override suspend fun markAllDuplicatesInDatabase() = withContext(Dispatchers.IO) {
+    private fun calculateFileSha256(context: Context, path: String, size: Long): String? {
+        val contentUri = getUriForPath(context, path)
+        val inputStream = if (contentUri != null) {
+            try {
+                context.contentResolver.openInputStream(contentUri)
+            } catch (e: Exception) {
+                null
+            }
+        } else {
+            val file = File(path)
+            if (file.exists() && file.isFile) {
+                try {
+                    file.inputStream()
+                } catch (e: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+        } ?: return null
+
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            inputStream.use { input ->
+                if (size <= 1024 * 1024) {
+                    val buffer = ByteArray(8 * 1024)
+                    var bytesRead = input.read(buffer)
+                    while (bytesRead != -1) {
+                        digest.update(buffer, 0, bytesRead)
+                        bytesRead = input.read(buffer)
+                    }
+                } else {
+                    val sampleSize = 100 * 1024
+                    val buffer = ByteArray(sampleSize)
+
+                    // 1. Read first 100 KB
+                    var bytesRead = input.read(buffer)
+                    if (bytesRead > 0) {
+                        digest.update(buffer, 0, bytesRead)
+                    }
+
+                    // 2. Read middle 100 KB
+                    try {
+                        val skipAmount = (size / 2) - sampleSize
+                        if (skipAmount > 0) {
+                            input.skip(skipAmount)
+                        }
+                        bytesRead = input.read(buffer)
+                        if (bytesRead > 0) {
+                            digest.update(buffer, 0, bytesRead)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("AppRepository", "Failed to skip/read middle for fast hashing", e)
+                    }
+
+                    // 3. Read last 100 KB
+                    try {
+                        val skipAmount = size - (size / 2) - sampleSize * 2
+                        if (skipAmount > 0) {
+                            input.skip(skipAmount)
+                        }
+                        bytesRead = input.read(buffer)
+                        if (bytesRead > 0) {
+                            digest.update(buffer, 0, bytesRead)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("AppRepository", "Failed to skip/read tail for fast hashing", e)
+                    }
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            Log.e("AppRepository", "Error calculating fast hash", e)
+            null
+        }
+    }
+
+    override suspend fun markAllDuplicatesInDatabase(context: Context) = withContext(Dispatchers.IO) {
         val allFiles = fileDao.getAllLocalNonSafeFilesList()
         val sizeGroups = allFiles.filter { it.size > 0 }.groupBy { it.size }.filter { it.value.size > 1 }
 
@@ -67,7 +207,7 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
 
         sizeGroups.forEach { (_, filesWithSameSize) ->
             val hashGroups = filesWithSameSize.groupBy { fileEntity ->
-                calculateFileSha256(File(fileEntity.path))
+                calculateFileSha256(context, fileEntity.path, fileEntity.size)
             }
 
             hashGroups.forEach { (hash, filesWithSameHash) ->
@@ -287,20 +427,79 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     override suspend fun updateFiles(files: List<FileEntity>) = fileDao.updateFiles(files)
     override suspend fun deleteFile(file: FileEntity) = fileDao.deleteFile(file)
     override suspend fun deleteFileById(id: Long) = fileDao.deleteFileById(id)
-    override suspend fun cleanAllJunk() = fileDao.clearAllJunk()
-    override suspend fun moveFilesToSafe(context: Context, ids: Set<Long>) = withContext(Dispatchers.IO) {
+    override suspend fun cleanAllJunk() = withContext(Dispatchers.IO) {
+        try {
+            val junkList = fileDao.getJunkFilesSync()
+            junkList.forEach { file ->
+                try {
+                    val f = File(file.path)
+                    if (f.exists()) {
+                        f.delete()
+                    }
+                } catch (e: Exception) {
+                    Log.e("AppRepository", "Failed to physically delete junk file ${file.path}", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AppRepository", "Error resolving junk files for physical deletion", e)
+        }
+        fileDao.clearAllJunk()
+    }
+
+    override suspend fun moveFilesToSafe(context: Context, ids: Set<Long>): List<Uri> = withContext(Dispatchers.IO) {
         val safeFolderDir = File(context.filesDir, "safe_folder_files")
         if (!safeFolderDir.exists()) {
             safeFolderDir.mkdirs()
         }
         val files = fileDao.getFilesByIds(ids.toList())
+        val mediaUrisToDelete = mutableListOf<Uri>()
+
         files.forEach { fileEntity ->
-            val srcFile = File(fileEntity.path)
-            if (srcFile.exists()) {
-                val encryptedFile = File(safeFolderDir, "${fileEntity.id}.enc")
-                val success = com.vvf.smartfilemanager.security.CryptoHelper.encryptFile(srcFile, encryptedFile)
-                if (success) {
-                    srcFile.delete()
+            val encryptedFile = File(safeFolderDir, "${fileEntity.id}.enc")
+            var encryptionSuccess = false
+
+            val contentUri = getUriForPath(context, fileEntity.path)
+            if (contentUri != null) {
+                try {
+                    context.contentResolver.openInputStream(contentUri)?.use { input ->
+                        encryptedFile.outputStream().use { output ->
+                            encryptionSuccess = com.vvf.smartfilemanager.security.CryptoHelper.encryptStream(input, output)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("AppRepository", "Failed to encrypt via content Uri: ${fileEntity.path}", e)
+                }
+            }
+
+            if (!encryptionSuccess) {
+                val srcFile = File(fileEntity.path)
+                if (srcFile.exists()) {
+                    try {
+                        srcFile.inputStream().use { input ->
+                            encryptedFile.outputStream().use { output ->
+                                encryptionSuccess = com.vvf.smartfilemanager.security.CryptoHelper.encryptStream(input, output)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("AppRepository", "Failed to encrypt via direct File: ${fileEntity.path}", e)
+                    }
+                }
+            }
+
+            if (encryptionSuccess) {
+                if (contentUri != null && contentUri.scheme == "content" && contentUri.authority?.contains("media") == true) {
+                    mediaUrisToDelete.add(contentUri)
+                    val updatedEntity = fileEntity.copy(
+                        path = encryptedFile.absolutePath,
+                        isSafe = true,
+                        cloudAccountEmail = fileEntity.path
+                    )
+                    fileDao.updateFile(updatedEntity)
+                } else {
+                    val srcFile = File(fileEntity.path)
+                    if (srcFile.exists()) {
+                        srcFile.delete()
+                    }
                     val updatedEntity = fileEntity.copy(
                         path = encryptedFile.absolutePath,
                         isSafe = true,
@@ -310,6 +509,7 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
                 }
             }
         }
+        mediaUrisToDelete
     }
 
     override suspend fun restoreFilesFromSafe(context: Context, ids: Set<Long>) = withContext(Dispatchers.IO) {
@@ -318,21 +518,61 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
             if (fileEntity.isSafe && fileEntity.cloudAccountEmail != null) {
                 val encryptedFile = File(fileEntity.path)
                 val originalPath = fileEntity.cloudAccountEmail
-                val destFile = File(originalPath)
-                val parentDir = destFile.parentFile
-                if (parentDir != null && !parentDir.exists()) {
-                    parentDir.mkdirs()
-                }
+                var restoreSuccess = false
+                var restoredUri: Uri? = null
+
                 if (encryptedFile.exists()) {
-                    val success = com.vvf.smartfilemanager.security.CryptoHelper.decryptFile(encryptedFile, destFile)
-                    if (success) {
+                    try {
+                        restoredUri = getMediaStoreUriForRestore(context, fileEntity.name, fileEntity.mimeType, originalPath)
+                        if (restoredUri != null) {
+                            context.contentResolver.openOutputStream(restoredUri)?.use { outputStream ->
+                                encryptedFile.inputStream().use { inputStream ->
+                                    restoreSuccess = com.vvf.smartfilemanager.security.CryptoHelper.decryptStream(inputStream, outputStream)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("AppRepository", "Failed to restore file to MediaStore: $originalPath", e)
+                    }
+
+                    if (!restoreSuccess) {
+                        val destFile = File(originalPath)
+                        val parentDir = destFile.parentFile
+                        if (parentDir != null && !parentDir.exists()) {
+                            parentDir.mkdirs()
+                        }
+                        try {
+                            destFile.outputStream().use { outputStream ->
+                                encryptedFile.inputStream().use { inputStream ->
+                                    restoreSuccess = com.vvf.smartfilemanager.security.CryptoHelper.decryptStream(inputStream, outputStream)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e("AppRepository", "Failed to restore file to raw File path: $originalPath", e)
+                        }
+                    }
+
+                    if (restoreSuccess) {
                         encryptedFile.delete()
+                        val finalPath = if (restoredUri != null) {
+                            getPathFromUri(context, restoredUri) ?: originalPath
+                        } else {
+                            originalPath
+                        }
                         val updatedEntity = fileEntity.copy(
-                            path = originalPath,
+                            path = finalPath,
                             isSafe = false,
                             cloudAccountEmail = null
                         )
                         fileDao.updateFile(updatedEntity)
+                    } else {
+                        restoredUri?.let { uri ->
+                            try {
+                                context.contentResolver.delete(uri, null, null)
+                            } catch (e: Exception) {
+                                Log.e("AppRepository", "Failed to clean up failed restore URI: $uri", e)
+                            }
+                        }
                     }
                 }
             }
@@ -424,10 +664,10 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
         prompt: String,
         systemInstruction: String?,
         enableThinkingMode: Boolean
-    ): Pair<String, String?> {
+    ): Pair<String, String?> = withContext(Dispatchers.IO) {
         try {
             // Secure delegation via the abstraction layer to prevent client exposure
-            return aiServiceProvider.generateContent(
+            aiServiceProvider.generateContent(
                 prompt = prompt,
                 systemInstruction = systemInstruction,
                 enableThinkingMode = enableThinkingMode,
@@ -435,7 +675,7 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
             )
         } catch (e: Exception) {
             Log.e("AppRepository", "Error calling AI provider: ", e)
-            return Pair("Failed via provider delegation: ${e.localizedMessage ?: e.message}", null)
+            Pair("Failed via provider delegation: ${e.localizedMessage ?: e.message}", null)
         }
     }
 

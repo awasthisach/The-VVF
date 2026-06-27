@@ -18,7 +18,7 @@ class DuplicateScanWorker(
             
             // Execute the bulk database updates within a background transaction context
             repository.clearAllDuplicateFlags()
-            repository.markAllDuplicatesInDatabase()
+            repository.markAllDuplicatesInDatabase(applicationContext)
             
             Log.i("DuplicateScanWorker", "Background duplicate analysis completed [StructuredLog: { event: \"duplicate_scan_worker_success\" }]")
             Result.success()

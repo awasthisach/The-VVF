@@ -330,6 +330,9 @@ interface FileDao {
     @Query("DELETE FROM files WHERE isLocal = 1 AND isJunk = 1")
     suspend fun clearAllJunk()
 
+    @Query("SELECT * FROM files WHERE isJunk = 1 AND isLocal = 1")
+    suspend fun getJunkFilesSync(): List<FileEntity>
+
     @Query("UPDATE files SET isSafe = 1 WHERE id IN (:ids)")
     suspend fun moveFilesToSafe(ids: Set<Long>)
 

@@ -22,7 +22,14 @@ fun StoragePermissionGate(
     onPermissionsGranted: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
-    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        listOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_AUDIO,
+            Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+        )
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         listOf(
             Manifest.permission.READ_MEDIA_IMAGES,
             Manifest.permission.READ_MEDIA_VIDEO,
@@ -34,7 +41,11 @@ fun StoragePermissionGate(
 
     val permState = rememberMultiplePermissionsState(permissions)
 
-    if (permState.allPermissionsGranted) {
+    val isGranted = permState.allPermissionsGranted || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && permState.permissions.any {
+        it.permission == Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED && it.status is com.google.accompanist.permissions.PermissionStatus.Granted
+    })
+
+    if (isGranted) {
         LaunchedEffect(Unit) {
             onPermissionsGranted?.invoke()
         }

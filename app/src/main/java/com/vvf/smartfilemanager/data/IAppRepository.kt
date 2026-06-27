@@ -25,7 +25,7 @@ interface IAppRepository {
     val mediaCount: Flow<Int>
     val mediaTotalSize: Flow<Long>
 
-    suspend fun markAllDuplicatesInDatabase()
+    suspend fun markAllDuplicatesInDatabase(context: android.content.Context)
     suspend fun clearAllDuplicateFlags()
 
     fun searchLocalNonSafeFiles(query: String, category: String, limit: Int): Flow<List<FileEntity>>
@@ -42,7 +42,8 @@ interface IAppRepository {
     suspend fun deleteFile(file: FileEntity)
     suspend fun deleteFileById(id: Long)
     suspend fun cleanAllJunk()
-    suspend fun moveFilesToSafe(context: android.content.Context, ids: Set<Long>)
+    fun getUriForPath(context: android.content.Context, path: String): android.net.Uri?
+    suspend fun moveFilesToSafe(context: android.content.Context, ids: Set<Long>): List<android.net.Uri>
     suspend fun restoreFilesFromSafe(context: android.content.Context, ids: Set<Long>)
     suspend fun scanAndSaveRealFiles(context: Context)
     suspend fun getPIN(): String?

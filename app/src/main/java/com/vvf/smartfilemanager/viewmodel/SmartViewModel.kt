@@ -144,7 +144,13 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val semanticResults: StateFlow<List<ScannedFile>> = fileScannerViewModel.semanticResults
     val isSemanticSearching: StateFlow<Boolean> = fileScannerViewModel.isSemanticSearching
     val safTreeUri: StateFlow<String?> = fileScannerViewModel.safTreeUri
-    val pendingDeleteIntent: StateFlow<PendingIntent?> = fileScannerViewModel.pendingDeleteIntent
+    val pendingDeleteIntent: StateFlow<PendingIntent?> = combine(
+        fileScannerViewModel.pendingDeleteIntent,
+        safeFolderViewModel.pendingDeleteIntent,
+        duplicateCleanerViewModel.pendingDeleteIntent
+    ) { scanIntent, safeIntent, duplicateIntent ->
+        duplicateIntent ?: safeIntent ?: scanIntent
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val storageSelectedFileIds: StateFlow<Set<Long>> = fileScannerViewModel.storageSelectedFileIds
     val isStorageScanning: StateFlow<Boolean> = fileScannerViewModel.isStorageScanning
     val storageScanProgress: StateFlow<Float> = fileScannerViewModel.storageScanProgress
@@ -195,7 +201,16 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteRealFilesBatch(context: Context, files: List<ScannedFile>, onComplete: (Boolean) -> Unit = {}) = fileScannerViewModel.deleteRealFilesBatch(context, files, onComplete)
     fun onSafDirectorySelected(context: Context, uri: Uri) = fileScannerViewModel.onSafDirectorySelected(context, uri)
     fun scanSafFiles(context: Context) = fileScannerViewModel.scanSafFiles(context)
-    fun clearPendingDeleteIntent() = fileScannerViewModel.clearPendingDeleteIntent()
+    fun clearPendingDeleteIntent() {
+        fileScannerViewModel.clearPendingDeleteIntent()
+        safeFolderViewModel.clearPendingDeleteIntent()
+        duplicateCleanerViewModel.clearPendingDeleteIntent()
+    }
+    fun isBiometricEnabled() = safeFolderViewModel.isBiometricEnabled()
+    fun enrollBiometrics(activity: androidx.fragment.app.FragmentActivity, pin: String, onSuccess: () -> Unit, onError: (String) -> Unit) =
+        safeFolderViewModel.enrollBiometrics(activity, pin, onSuccess, onError)
+    fun unlockWithBiometricsSecure(activity: androidx.fragment.app.FragmentActivity, onSuccess: () -> Unit, onError: (String) -> Unit) =
+        safeFolderViewModel.unlockWithBiometricsSecure(activity, onSuccess, onError)
     fun renamePhysicalFile(context: Context, file: ScannedFile, newName: String, onComplete: (Boolean) -> Unit) = fileScannerViewModel.renamePhysicalFile(context, file, newName, onComplete)
     fun copyPhysicalFile(context: Context, source: ScannedFile, destinationFolderUriString: String, onComplete: (Boolean) -> Unit) = fileScannerViewModel.copyPhysicalFile(context, source, destinationFolderUriString, onComplete)
     fun movePhysicalFile(context: Context, source: ScannedFile, destinationFolderUriString: String, onComplete: (Boolean) -> Unit) = fileScannerViewModel.movePhysicalFile(context, source, destinationFolderUriString, onComplete)
