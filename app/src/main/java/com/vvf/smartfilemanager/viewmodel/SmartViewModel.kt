@@ -30,6 +30,10 @@ enum class CleanerState {
 
 class SmartViewModel(application: Application) : AndroidViewModel(application) {
 
+    init {
+        Log.e("VVF_STARTUP", "SmartViewModel constructor STARTED")
+    }
+
     private val db = AppDatabase.getDatabase(application)
     private val repository = AppRepository(db)
 
@@ -40,6 +44,11 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val duplicateCleanerViewModel = DuplicateCleanerViewModel(application, repository)
     val aiSearchViewModel = AiSearchViewModel(application, repository)
     val fileScannerViewModel = FileScannerViewModel(application, repository)
+
+    init {
+        android.util.Log.d("VVF_TRACE", "VVF_TRACE: ViewModel Initialized")
+        Log.e("VVF_STARTUP", "SmartViewModel constructor COMPLETED. DB: $db, Repository: $repository")
+    }
 
     // Delegated Theme States & Methods
     val isDarkMode: StateFlow<Boolean> = themeViewModel.isDarkMode
@@ -327,7 +336,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadTrackedRepositories() {
-        val sharedPrefs = android.preference.PreferenceManager.getDefaultSharedPreferences(getApplication())
+        val sharedPrefs = getApplication<Application>().getSharedPreferences("${getApplication<Application>().packageName}_preferences", android.content.Context.MODE_PRIVATE)
         val repoPaths = sharedPrefs.getStringSet("tracked_repos_set", null) ?: setOf("google/dagger")
         val list = repoPaths.map { path ->
             val lastSynced = sharedPrefs.getLong("repo_sync_time_$path", 0L)
@@ -338,7 +347,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveTrackedRepository(path: String, lastSynced: Long, status: String) {
-        val sharedPrefs = android.preference.PreferenceManager.getDefaultSharedPreferences(getApplication())
+        val sharedPrefs = getApplication<Application>().getSharedPreferences("${getApplication<Application>().packageName}_preferences", android.content.Context.MODE_PRIVATE)
         val currentSet = sharedPrefs.getStringSet("tracked_repos_set", null) ?: setOf("google/dagger")
         val newSet = currentSet.toMutableSet()
         newSet.add(path)
@@ -351,7 +360,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun removeTrackedRepository(path: String) {
-        val sharedPrefs = android.preference.PreferenceManager.getDefaultSharedPreferences(getApplication())
+        val sharedPrefs = getApplication<Application>().getSharedPreferences("${getApplication<Application>().packageName}_preferences", android.content.Context.MODE_PRIVATE)
         val currentSet = sharedPrefs.getStringSet("tracked_repos_set", null) ?: setOf("google/dagger")
         val newSet = currentSet.toMutableSet()
         newSet.remove(path)

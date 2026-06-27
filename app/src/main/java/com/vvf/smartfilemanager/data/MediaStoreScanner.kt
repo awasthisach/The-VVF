@@ -5,10 +5,13 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MediaStoreScanner(private val context: Context) {
 
-    suspend fun scanAllFilesPaged(chunkSize: Int = 1000, onChunkScanned: suspend (List<ScannedFile>) -> Unit) {
+    suspend fun scanAllFilesPaged(chunkSize: Int = 1000, onChunkScanned: suspend (List<ScannedFile>) -> Unit) = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
         val filesList = mutableListOf<ScannedFile>()
         val contentResolver = context.contentResolver
 
@@ -80,9 +83,12 @@ class MediaStoreScanner(private val context: Context) {
         if (filesList.isNotEmpty()) {
             onChunkScanned(filesList)
         }
+        val duration = System.currentTimeMillis() - start
+        Log.e("VVF_PERF", "SCAN TOOK = $duration ms")
     }
 
-    fun scanAllFiles(): List<ScannedFile> {
+    suspend fun scanAllFiles(): List<ScannedFile> = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
         val filesList = mutableListOf<ScannedFile>()
         val contentResolver = context.contentResolver
 
@@ -146,7 +152,9 @@ class MediaStoreScanner(private val context: Context) {
                 Log.e("MediaStoreScanner", "Error scanning URI: $uri", e)
             }
         }
-        return filesList
+        val duration = System.currentTimeMillis() - start
+        Log.e("VVF_PERF", "SCAN TOOK = $duration ms")
+        filesList
     }
 
     fun findDuplicates(files: List<ScannedFile>): Map<String, List<ScannedFile>> {

@@ -77,6 +77,14 @@ jobs:
           chmod +x gradlew
         fi
 
+    - name: Run Android Lint Audit
+      run: |
+        if [ -f gradlew ]; then
+          ./gradlew lintDebug --no-daemon
+        else
+          gradle lintDebug --no-daemon
+        fi
+
     - name: Run Unit & Robolectric Tests
       run: |
         if [ -f gradlew ]; then

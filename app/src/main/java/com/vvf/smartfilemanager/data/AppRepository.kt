@@ -16,6 +16,10 @@ import java.io.File
 
 class AppRepository(private val db: AppDatabase) : IAppRepository {
 
+    init {
+        android.util.Log.d("VVF_TRACE", "VVF_TRACE: Repository Initialized")
+    }
+
     private val fileDao = db.fileDao()
     private val categoryDao = db.categoryDao()
     private val secureStateDao = db.secureStateDao()
@@ -579,31 +583,33 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
         }
     }
 
-    override suspend fun scanAndSaveRealFiles(context: Context) = withContext(Dispatchers.IO) {
-        val scanner = MediaStoreScanner(context)
-        fileDao.clearLocalNonSafeFiles()
-        scanner.scanAllFilesPaged(chunkSize = 1000) { chunk ->
-            if (chunk.isNotEmpty()) {
-                val fileEntities = chunk.map { scanned ->
-                    FileEntity(
-                        name = scanned.name,
-                        path = scanned.path,
-                        size = scanned.size,
-                        lastModified = System.currentTimeMillis(),
-                        mimeType = scanned.mimeType,
-                        isLocal = true,
-                        isSafe = false,
-                        isDuplicate = false,
-                        isJunk = false
-                    )
-                }
-                // Insert chunk into the database, keeping peak JVM memory extremely low (O(1) with respect to total device files)
-                try {
-                    db.withTransaction {
-                        fileDao.insertFiles(fileEntities)
+    override suspend fun scanAndSaveRealFiles(context: Context) {
+        withContext(Dispatchers.IO) {
+            val scanner = MediaStoreScanner(context)
+            fileDao.clearLocalNonSafeFiles()
+            scanner.scanAllFilesPaged(chunkSize = 1000) { chunk ->
+                if (chunk.isNotEmpty()) {
+                    val fileEntities = chunk.map { scanned ->
+                        FileEntity(
+                            name = scanned.name,
+                            path = scanned.path,
+                            size = scanned.size,
+                            lastModified = System.currentTimeMillis(),
+                            mimeType = scanned.mimeType,
+                            isLocal = true,
+                            isSafe = false,
+                            isDuplicate = false,
+                            isJunk = false
+                        )
                     }
-                } catch (e: Exception) {
-                    Log.e("AppRepository", "Failed to insert batch chunk of size ${chunk.size}", e)
+                    // Insert chunk into the database, keeping peak JVM memory extremely low (O(1) with respect to total device files)
+                    try {
+                        db.withTransaction {
+                            fileDao.insertFiles(fileEntities)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("AppRepository", "Failed to insert batch chunk of size ${chunk.size}", e)
+                    }
                 }
             }
         }

@@ -56,6 +56,11 @@ import androidx.paging.compose.collectAsLazyPagingItems
 
 @Composable
 fun MainLayout(viewModel: SmartViewModel) {
+    android.util.Log.d("VVF_TRACE", "VVF_TRACE: MainLayout Rendered")
+    LaunchedEffect(Unit) {
+        Log.e("VVF_RENDER", "MAINLAYOUT_RENDERED")
+    }
+    Log.e("VVF_STARTUP", "MainLayout composition started")
     val rootContext = LocalContext.current
     val safTreeUri by viewModel.safTreeUri.collectAsStateWithLifecycle()
     var activeTab by remember { mutableStateOf(1) } // Default to Browse (1) matching Google Files landing page!

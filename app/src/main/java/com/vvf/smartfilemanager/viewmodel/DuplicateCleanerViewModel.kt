@@ -100,7 +100,7 @@ class DuplicateCleanerViewModel(
     }
 
     fun deleteSelectedDuplicates() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             Log.d("DuplicateCleanerVM", "Deleting selected duplicates [StructuredLog: { event: \"duplicate_delete_start\" }]")
             val selected = duplicateFiles.value.filter { it.isDuplicate }
             if (selected.isEmpty()) return@launch

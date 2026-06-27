@@ -613,7 +613,9 @@ class FileScannerViewModel(
             delay(200)
             repository.scanAndSaveRealFiles(appContext)
             try {
-                val scanned = MediaStoreScanner(appContext).scanAllFiles()
+                val scanned = withContext(Dispatchers.IO) {
+                    MediaStoreScanner(appContext).scanAllFiles()
+                }
                 _realFiles.value = scanned
             } catch (e: Exception) {
                 Log.e("FileScannerViewModel", "Error scanning real files", e)
@@ -636,7 +638,9 @@ class FileScannerViewModel(
             _realScanProgress.value = 0f
             _realScanStatusMessage.value = "Locating files..."
             try {
-                val scanned = MediaStoreScanner(getApplication()).scanAllFiles()
+                val scanned = withContext(Dispatchers.IO) {
+                    MediaStoreScanner(getApplication()).scanAllFiles()
+                }
                 _realFiles.value = scanned
             } catch (e: Exception) {
                 Log.e("FileScannerViewModel", "Error scanning files in scanRealFiles", e)
@@ -1404,7 +1408,7 @@ class FileScannerViewModel(
     }
 
     fun deleteSelectedStorageFiles() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val selected = _storageSelectedFileIds.value
             if (selected.isEmpty()) return@launch
 

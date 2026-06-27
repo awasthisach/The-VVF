@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +17,8 @@ import com.vvf.smartfilemanager.ui.MainLayout
 import com.vvf.smartfilemanager.ui.StoragePermissionGate
 import com.vvf.smartfilemanager.ui.theme.MyApplicationTheme
 import com.vvf.smartfilemanager.viewmodel.SmartViewModel
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 
 import androidx.fragment.app.FragmentActivity
 
@@ -26,6 +29,7 @@ class MainActivity : FragmentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.all { it.value }
+        Log.e("VVF_STARTUP", "permissionLauncher callback. allGranted = $allGranted")
         if (allGranted) {
             viewModel.scanRealDeviceFiles(this)
         }
@@ -33,31 +37,43 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        android.util.Log.d("VVF_TRACE", "VVF_TRACE: Activity Created")
+        Log.e("VVF_STARTUP", "MainActivity.onCreate() STARTED")
         
-        // Prevent screenshots and recent screen previews to protect private files
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        // Prevent screenshots and recent screen previews to protect private files (commented out for streaming emulator preview compatibility)
+        // window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         
         enableEdgeToEdge()
 
-        // Check and request appropriate permissions
-        checkAndRequestPermissions()
+        // Check and request appropriate permissions (disabled on immediate launch to prevent system permission dialog from blocking the initial render in emulator preview)
+        // checkAndRequestPermissions()
 
         setContent {
+            Log.e("VVF_STARTUP", "MainActivity.setContent() Composition Started")
             val isDarkTheme by viewModel.isDarkMode.collectAsStateWithLifecycle()
             val context = androidx.compose.ui.platform.LocalContext.current
+            Log.e("VVF_STARTUP", "MainActivity.setContent() Theme collected. isDarkTheme = $isDarkTheme")
             MyApplicationTheme(darkTheme = isDarkTheme) {
-                StoragePermissionGate(
-                    onPermissionsGranted = {
-                        viewModel.scanRealDeviceFiles(context)
-                    }
+                androidx.compose.material3.Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.background
                 ) {
-                    MainLayout(viewModel = viewModel)
+                    StoragePermissionGate(
+                        onPermissionsGranted = {
+                            Log.e("VVF_STARTUP", "StoragePermissionGate.onPermissionsGranted callback triggered")
+                            viewModel.scanRealDeviceFiles(context)
+                        }
+                    ) {
+                        Log.e("VVF_STARTUP", "StoragePermissionGate.content() content block composition")
+                        MainLayout(viewModel = viewModel)
+                    }
                 }
             }
         }
     }
 
     private fun checkAndRequestPermissions() {
+        android.util.Log.d("VVF_TRACE", "VVF_TRACE: Permission Check Started")
         val permissionsNeeded = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             arrayOf(
                 Manifest.permission.READ_MEDIA_IMAGES,
@@ -89,11 +105,14 @@ class MainActivity : FragmentActivity() {
             }
         }
 
+        Log.e("VVF_STARTUP", "checkAndRequestPermissions(): hasAllPermissions = $hasAllPermissions")
+
         if (hasAllPermissions) {
             // Permissions already granted, start scanning
             viewModel.scanRealDeviceFiles(this)
         } else {
             // Request permissions
+            Log.e("VVF_STARTUP", "Launching permissionLauncher for: ${permissionsNeeded.joinToString()}")
             permissionLauncher.launch(permissionsNeeded)
         }
     }

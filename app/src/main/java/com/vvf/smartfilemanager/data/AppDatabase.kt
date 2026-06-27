@@ -58,8 +58,9 @@ abstract class AppDatabase : RoomDatabase() {
                     "smart_files_database"
                 )
                 .addMigrations(MIGRATION_2_3)
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
+                android.util.Log.d("VVF_TRACE", "VVF_TRACE: Database Initialized")
                 INSTANCE = instance
                 instance
             }

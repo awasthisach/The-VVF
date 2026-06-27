@@ -2,6 +2,7 @@ package com.vvf.smartfilemanager.ui
 
 import android.Manifest
 import android.os.Build
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
@@ -22,6 +23,7 @@ fun StoragePermissionGate(
     onPermissionsGranted: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
+    Log.e("VVF_STARTUP", "StoragePermissionGate composition started")
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
         listOf(
             Manifest.permission.READ_MEDIA_IMAGES,
@@ -45,12 +47,20 @@ fun StoragePermissionGate(
         it.permission == Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED && it.status is com.google.accompanist.permissions.PermissionStatus.Granted
     })
 
+    Log.e("VVF_STARTUP", "StoragePermissionGate: isGranted = $isGranted (allPermissionsGranted = ${permState.allPermissionsGranted})")
+
     if (isGranted) {
         LaunchedEffect(Unit) {
+            Log.e("VVF_STARTUP", "StoragePermissionGate isGranted=true, executing onPermissionsGranted callback")
             onPermissionsGranted?.invoke()
         }
         content()
     } else {
+        android.util.Log.d("VVF_TRACE", "VVF_TRACE: Permission Screen Rendered")
+        LaunchedEffect(Unit) {
+            Log.e("VVF_RENDER", "PERMISSION_SCREEN_RENDERED")
+        }
+        Log.e("VVF_STARTUP", "StoragePermissionGate isGranted=false, rendering 'Storage Access Required' screen")
         Column(
             modifier = Modifier
                 .fillMaxSize()
