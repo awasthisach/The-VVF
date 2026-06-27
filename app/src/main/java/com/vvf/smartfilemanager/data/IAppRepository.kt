@@ -29,6 +29,7 @@ interface IAppRepository {
     suspend fun clearAllDuplicateFlags()
 
     fun searchLocalNonSafeFiles(query: String, category: String, limit: Int): Flow<List<FileEntity>>
+    fun getPagedFiles(query: String, category: String, sortOrder: com.vvf.smartfilemanager.viewmodel.SortOrder): Flow<androidx.paging.PagingData<FileEntity>>
     fun getScannedDuplicates(limit: Int): Flow<List<FileEntity>>
     fun getLargeTempFiles(limit: Int): Flow<List<FileEntity>>
 
@@ -41,8 +42,8 @@ interface IAppRepository {
     suspend fun deleteFile(file: FileEntity)
     suspend fun deleteFileById(id: Long)
     suspend fun cleanAllJunk()
-    suspend fun moveFilesToSafe(ids: Set<Long>)
-    suspend fun restoreFilesFromSafe(ids: Set<Long>)
+    suspend fun moveFilesToSafe(context: android.content.Context, ids: Set<Long>)
+    suspend fun restoreFilesFromSafe(context: android.content.Context, ids: Set<Long>)
     suspend fun scanAndSaveRealFiles(context: Context)
     suspend fun getPIN(): String?
     suspend fun setPIN(pin: String)
@@ -69,4 +70,12 @@ interface IAppRepository {
     suspend fun clearAllTrash()
     suspend fun getTrashById(id: Long): TrashEntity?
     suspend fun deleteTrashBeforeTimestamp(timestamp: Long)
+    suspend fun getFileByPath(path: String): FileEntity?
+    suspend fun getFilesByPaths(paths: List<String>): List<FileEntity>
+    suspend fun getFilesByIds(ids: List<Long>): List<FileEntity>
+    suspend fun getFilteredFileIds(query: String, category: String): List<Long>
+
+    fun getPagedSafeFiles(): Flow<androidx.paging.PagingData<FileEntity>>
+    fun getPagedScannedDuplicates(): Flow<androidx.paging.PagingData<FileEntity>>
+    fun getPagedTrashFiles(): Flow<androidx.paging.PagingData<TrashEntity>>
 }

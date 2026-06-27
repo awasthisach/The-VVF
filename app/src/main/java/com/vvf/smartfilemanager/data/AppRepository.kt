@@ -39,8 +39,50 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     override val mediaCount: Flow<Int> = fileDao.getMediaCount()
     override val mediaTotalSize: Flow<Long> = fileDao.getMediaTotalSize()
 
+    private fun calculateFileSha256(file: File): String? {
+        if (!file.exists() || !file.isFile) return null
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8 * 1024)
+                var bytesRead = input.read(buffer)
+                while (bytesRead != -1) {
+                    digest.update(buffer, 0, bytesRead)
+                    bytesRead = input.read(buffer)
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     override suspend fun markAllDuplicatesInDatabase() = withContext(Dispatchers.IO) {
-        fileDao.markAllDuplicatesInDatabase()
+        val allFiles = fileDao.getAllLocalNonSafeFilesList()
+        val sizeGroups = allFiles.filter { it.size > 0 }.groupBy { it.size }.filter { it.value.size > 1 }
+
+        fileDao.clearAllDuplicateFlags()
+
+        val duplicatesToMark = mutableListOf<Long>()
+
+        sizeGroups.forEach { (_, filesWithSameSize) ->
+            val hashGroups = filesWithSameSize.groupBy { fileEntity ->
+                calculateFileSha256(File(fileEntity.path))
+            }
+
+            hashGroups.forEach { (hash, filesWithSameHash) ->
+                if (hash != null && filesWithSameHash.size > 1) {
+                    val sorted = filesWithSameHash.sortedBy { it.id }
+                    for (i in 1 until sorted.size) {
+                        duplicatesToMark.add(sorted[i].id)
+                    }
+                }
+            }
+        }
+
+        if (duplicatesToMark.isNotEmpty()) {
+            fileDao.markIdsAsDuplicates(duplicatesToMark)
+        }
     }
 
     override suspend fun clearAllDuplicateFlags() = withContext(Dispatchers.IO) {
@@ -49,6 +91,30 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
 
     override fun searchLocalNonSafeFiles(query: String, category: String, limit: Int): Flow<List<FileEntity>> {
         return fileDao.searchLocalNonSafeFiles(query, category, limit)
+    }
+
+    override fun getPagedFiles(
+        query: String,
+        category: String,
+        sortOrder: com.vvf.smartfilemanager.viewmodel.SortOrder
+    ): Flow<androidx.paging.PagingData<FileEntity>> {
+        return androidx.paging.Pager(
+            config = androidx.paging.PagingConfig(
+                pageSize = 20,
+                enablePlaceholders = false
+            ),
+            pagingSourceFactory = {
+                when (sortOrder) {
+                    com.vvf.smartfilemanager.viewmodel.SortOrder.NAME_ASC -> fileDao.getPagedFilesNameAsc(query, category)
+                    com.vvf.smartfilemanager.viewmodel.SortOrder.NAME_DESC -> fileDao.getPagedFilesNameDesc(query, category)
+                    com.vvf.smartfilemanager.viewmodel.SortOrder.DATE_NEWEST -> fileDao.getPagedFilesDateNewest(query, category)
+                    com.vvf.smartfilemanager.viewmodel.SortOrder.DATE_OLDEST -> fileDao.getPagedFilesDateOldest(query, category)
+                    com.vvf.smartfilemanager.viewmodel.SortOrder.SIZE_LARGEST -> fileDao.getPagedFilesSizeLargest(query, category)
+                    com.vvf.smartfilemanager.viewmodel.SortOrder.SIZE_SMALLEST -> fileDao.getPagedFilesSizeSmallest(query, category)
+                    else -> fileDao.getPagedFilesDateNewest(query, category)
+                }
+            }
+        ).flow
     }
 
     override fun getScannedDuplicates(limit: Int): Flow<List<FileEntity>> {
@@ -222,8 +288,56 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     override suspend fun deleteFile(file: FileEntity) = fileDao.deleteFile(file)
     override suspend fun deleteFileById(id: Long) = fileDao.deleteFileById(id)
     override suspend fun cleanAllJunk() = fileDao.clearAllJunk()
-    override suspend fun moveFilesToSafe(ids: Set<Long>) = fileDao.moveFilesToSafe(ids)
-    override suspend fun restoreFilesFromSafe(ids: Set<Long>) = fileDao.restoreFilesFromSafe(ids)
+    override suspend fun moveFilesToSafe(context: Context, ids: Set<Long>) = withContext(Dispatchers.IO) {
+        val safeFolderDir = File(context.filesDir, "safe_folder_files")
+        if (!safeFolderDir.exists()) {
+            safeFolderDir.mkdirs()
+        }
+        val files = fileDao.getFilesByIds(ids.toList())
+        files.forEach { fileEntity ->
+            val srcFile = File(fileEntity.path)
+            if (srcFile.exists()) {
+                val encryptedFile = File(safeFolderDir, "${fileEntity.id}.enc")
+                val success = com.vvf.smartfilemanager.security.CryptoHelper.encryptFile(srcFile, encryptedFile)
+                if (success) {
+                    srcFile.delete()
+                    val updatedEntity = fileEntity.copy(
+                        path = encryptedFile.absolutePath,
+                        isSafe = true,
+                        cloudAccountEmail = fileEntity.path
+                    )
+                    fileDao.updateFile(updatedEntity)
+                }
+            }
+        }
+    }
+
+    override suspend fun restoreFilesFromSafe(context: Context, ids: Set<Long>) = withContext(Dispatchers.IO) {
+        val files = fileDao.getFilesByIds(ids.toList())
+        files.forEach { fileEntity ->
+            if (fileEntity.isSafe && fileEntity.cloudAccountEmail != null) {
+                val encryptedFile = File(fileEntity.path)
+                val originalPath = fileEntity.cloudAccountEmail
+                val destFile = File(originalPath)
+                val parentDir = destFile.parentFile
+                if (parentDir != null && !parentDir.exists()) {
+                    parentDir.mkdirs()
+                }
+                if (encryptedFile.exists()) {
+                    val success = com.vvf.smartfilemanager.security.CryptoHelper.decryptFile(encryptedFile, destFile)
+                    if (success) {
+                        encryptedFile.delete()
+                        val updatedEntity = fileEntity.copy(
+                            path = originalPath,
+                            isSafe = false,
+                            cloudAccountEmail = null
+                        )
+                        fileDao.updateFile(updatedEntity)
+                    }
+                }
+            }
+        }
+    }
 
     override suspend fun scanAndSaveRealFiles(context: Context) = withContext(Dispatchers.IO) {
         val scanner = MediaStoreScanner(context)
@@ -256,12 +370,24 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
     }
 
     // PIN / Secure Safe State Logic
+    private fun hashPin(pin: String): String {
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val salt = "VVF_SMART_FILE_MANAGER_SECURE_SALT_2026"
+            val hashBytes = digest.digest((pin + salt).toByteArray(Charsets.UTF_8))
+            hashBytes.joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            pin // Safe fallback (SHA-256 is guaranteed to be available on all Android platforms)
+        }
+    }
+
     override suspend fun getPIN(): String? {
         return secureStateDao.getStateByKey("SAFE_PIN")?.stateValue
     }
 
     override suspend fun setPIN(pin: String) {
-        secureStateDao.insertState(SecureStateEntity("SAFE_PIN", pin))
+        val hashedPin = hashPin(pin)
+        secureStateDao.insertState(SecureStateEntity("SAFE_PIN", hashedPin))
     }
 
     override suspend fun getIsPinSet(): Boolean {
@@ -338,5 +464,42 @@ class AppRepository(private val db: AppDatabase) : IAppRepository {
 
     override suspend fun deleteTrashBeforeTimestamp(timestamp: Long) = withContext(Dispatchers.IO) {
         trashDao.deleteTrashBeforeTimestamp(timestamp)
+    }
+
+    override suspend fun getFileByPath(path: String): FileEntity? = withContext(Dispatchers.IO) {
+        fileDao.getFileByPath(path)
+    }
+
+    override suspend fun getFilesByPaths(paths: List<String>): List<FileEntity> = withContext(Dispatchers.IO) {
+        fileDao.getFilesByPaths(paths)
+    }
+
+    override suspend fun getFilesByIds(ids: List<Long>): List<FileEntity> = withContext(Dispatchers.IO) {
+        fileDao.getFilesByIds(ids)
+    }
+
+    override suspend fun getFilteredFileIds(query: String, category: String): List<Long> = withContext(Dispatchers.IO) {
+        fileDao.getFilteredFileIds(query, category)
+    }
+
+    override fun getPagedSafeFiles(): Flow<androidx.paging.PagingData<FileEntity>> {
+        return androidx.paging.Pager(
+            config = androidx.paging.PagingConfig(pageSize = 20, enablePlaceholders = false),
+            pagingSourceFactory = { fileDao.getSafeFilesPaged() }
+        ).flow
+    }
+
+    override fun getPagedScannedDuplicates(): Flow<androidx.paging.PagingData<FileEntity>> {
+        return androidx.paging.Pager(
+            config = androidx.paging.PagingConfig(pageSize = 20, enablePlaceholders = false),
+            pagingSourceFactory = { fileDao.getScannedDuplicatesPaged() }
+        ).flow
+    }
+
+    override fun getPagedTrashFiles(): Flow<androidx.paging.PagingData<TrashEntity>> {
+        return androidx.paging.Pager(
+            config = androidx.paging.PagingConfig(pageSize = 20, enablePlaceholders = false),
+            pagingSourceFactory = { trashDao.getAllTrashPaged() }
+        ).flow
     }
 }

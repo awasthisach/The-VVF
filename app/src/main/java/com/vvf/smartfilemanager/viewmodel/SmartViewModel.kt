@@ -12,6 +12,7 @@ import com.vvf.smartfilemanager.BuildConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import androidx.paging.PagingData
 
 sealed interface SafeFolderState {
     object PinSetupNeeded : SafeFolderState
@@ -69,9 +70,11 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val inputPinBuffer: StateFlow<String> = safeFolderViewModel.inputPinBuffer
     val pinErrorMessage: StateFlow<String?> = safeFolderViewModel.pinErrorMessage
     val allSafeFiles: StateFlow<List<FileEntity>> = safeFolderViewModel.allSafeFiles
+    val pagedSafeFiles: Flow<PagingData<FileEntity>> = safeFolderViewModel.pagedSafeFiles
     fun appendPinDigit(digit: String) = safeFolderViewModel.appendPinDigit(digit)
     fun clearLastPinDigit() = safeFolderViewModel.clearLastPinDigit()
     fun lockSafeFolder() = safeFolderViewModel.lockSafeFolder()
+    fun unlockWithBiometrics() = safeFolderViewModel.unlockWithBiometrics()
     fun restoreSelectedFromSafe(selectedIds: Set<Long>) = safeFolderViewModel.restoreSelectedFromSafe(selectedIds)
     fun moveSelectedToSafe(selectedIds: Set<Long>, onClearSelection: () -> Unit) =
         safeFolderViewModel.moveSelectedToSafe(selectedIds, onClearSelection)
@@ -97,6 +100,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
 
     val cleanerProgress: StateFlow<Float> = duplicateCleanerViewModel.cleanerProgress
     val scannedDuplicates: StateFlow<List<FileEntity>> = duplicateCleanerViewModel.scannedDuplicates
+    val pagedScannedDuplicates: Flow<PagingData<FileEntity>> = duplicateCleanerViewModel.pagedScannedDuplicates
     val scannedLargeTempFiles: StateFlow<List<FileEntity>> = duplicateCleanerViewModel.scannedLargeTempFiles
     val duplicateFiles: StateFlow<List<FileEntity>> = duplicateCleanerViewModel.duplicateFiles
     val junkFiles: StateFlow<List<FileEntity>> = duplicateCleanerViewModel.junkFiles
@@ -123,12 +127,13 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     val mediaCount: StateFlow<Int> = fileScannerViewModel.mediaCount
     val mediaTotalSize: StateFlow<Long> = fileScannerViewModel.mediaTotalSize
     val selectedCategory: StateFlow<String> = fileScannerViewModel.selectedCategory
-    val filteredLocalFiles: StateFlow<List<FileEntity>> = fileScannerViewModel.filteredLocalFiles
+    val filteredLocalFiles: Flow<PagingData<FileEntity>> = fileScannerViewModel.filteredLocalFiles
     val localSearchQuery: StateFlow<String> = fileScannerViewModel.localSearchQuery
     val selectedLocalFileIds: StateFlow<Set<Long>> = fileScannerViewModel.selectedLocalFileIds
     val isMultiSelectMode: StateFlow<Boolean> = fileScannerViewModel.isMultiSelectMode
     val realFiles: StateFlow<List<ScannedFile>> = fileScannerViewModel.realFiles
     val realDuplicates: StateFlow<Map<String, List<ScannedFile>>> = fileScannerViewModel.realDuplicates
+    val selectedDuplicateUris: StateFlow<Set<String>> = fileScannerViewModel.selectedDuplicateUris
     val isScanningRealFiles: StateFlow<Boolean> = fileScannerViewModel.isScanningRealFiles
     val realScanProgress: StateFlow<Float> = fileScannerViewModel.realScanProgress
     val realScanStatusMessage: StateFlow<String> = fileScannerViewModel.realScanStatusMessage
@@ -160,6 +165,10 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
 
     val pinnedDirectories: StateFlow<Set<String>> = fileScannerViewModel.pinnedDirectories
     val selectedFolderFilter: StateFlow<String?> = fileScannerViewModel.selectedFolderFilter
+
+    val allTrashFiles: StateFlow<List<TrashEntity>> = fileScannerViewModel.allTrashFiles
+    val pagedTrashFiles: Flow<PagingData<TrashEntity>> = fileScannerViewModel.pagedTrashFiles
+    val trashCleanupDays: StateFlow<Int> = fileScannerViewModel.trashCleanupDays
 
     fun togglePinnedDirectory(directory: String) = fileScannerViewModel.togglePinnedDirectory(directory)
     fun toggleFolderFilter(folder: String) = fileScannerViewModel.toggleFolderFilter(folder)
@@ -193,6 +202,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     fun deletePhysicalFile(context: Context, file: ScannedFile, onComplete: (Boolean) -> Unit) = fileScannerViewModel.deletePhysicalFile(context, file, onComplete)
     fun deleteRealDuplicates(keepFirst: Boolean = true) = fileScannerViewModel.deleteRealDuplicates(keepFirst)
     fun toggleLocalFileSelection(id: Long) = fileScannerViewModel.toggleLocalFileSelection(id)
+    fun selectAllLocalFiles() = fileScannerViewModel.selectAllLocalFiles()
     fun selectAllLocalFiles(filesList: List<FileEntity>) = fileScannerViewModel.selectAllLocalFiles(filesList)
     fun clearLocalSelection() = fileScannerViewModel.clearLocalSelection()
     fun updateLocalSearchQuery(query: String) = fileScannerViewModel.updateLocalSearchQuery(query)
@@ -210,6 +220,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     fun captureDocument() = fileScannerViewModel.captureDocument()
     fun saveScannedDocument(onSavedCompletable: () -> Unit = {}) = fileScannerViewModel.saveScannedDocument(onSavedCompletable)
     fun deleteLocalFilesByIds(ids: Set<Long>) = fileScannerViewModel.deleteLocalFilesByIds(ids)
+    fun createFolder(context: Context, folderName: String, onComplete: (Boolean, String?) -> Unit) = fileScannerViewModel.createFolder(context, folderName, onComplete)
     fun selectActiveCloudAccount(email: String) = fileScannerViewModel.selectActiveCloudAccount(email)
     fun addNewCloudAccount(name: String, email: String) = fileScannerViewModel.addNewCloudAccount(name, email)
     fun logoutVirtualAccount(email: String) = fileScannerViewModel.logoutVirtualAccount(email)
@@ -219,6 +230,25 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
     fun updateCloudSearchQuery(query: String) = fileScannerViewModel.updateCloudSearchQuery(query)
     fun deleteCloudFilesByIds(ids: Set<Long>) = fileScannerViewModel.deleteCloudFilesByIds(ids)
     fun setCloudSubTab(tab: Int) = fileScannerViewModel.setCloudSubTab(tab)
+
+    fun updateTrashCleanupDays(days: Int) = fileScannerViewModel.updateTrashCleanupDays(days)
+    fun restoreFile(trash: TrashEntity) = fileScannerViewModel.restoreFile(trash)
+    fun restoreAllTrash() = fileScannerViewModel.restoreAllTrash()
+    fun deleteForever(trash: TrashEntity) = fileScannerViewModel.deleteForever(trash)
+    fun emptyRecycleBin() = fileScannerViewModel.emptyRecycleBin()
+
+    fun toggleDuplicateSelection(uriString: String) = fileScannerViewModel.toggleDuplicateSelection(uriString)
+    fun clearDuplicateSelection() = fileScannerViewModel.clearDuplicateSelection()
+    fun selectDuplicatesNewest() = fileScannerViewModel.selectDuplicatesNewest()
+    fun selectDuplicatesOldest() = fileScannerViewModel.selectDuplicatesOldest()
+    fun selectDuplicatesLargest() = fileScannerViewModel.selectDuplicatesLargest()
+    fun bulkDeleteSelectedDuplicates() = fileScannerViewModel.bulkDeleteSelectedDuplicates()
+    fun moveSelectedDuplicatesToTrash() = fileScannerViewModel.moveSelectedDuplicatesToTrash()
+    fun moveSelectedDuplicatesToFolder(destFolder: java.io.File) = fileScannerViewModel.moveSelectedDuplicatesToFolder(destFolder)
+    fun getMediaRootDir(): java.io.File = fileScannerViewModel.getMediaRootDir()
+    fun getAllSubFolders(): List<java.io.File> = fileScannerViewModel.getAllSubFolders()
+    fun moveSelectedLocalFiles(context: android.content.Context, ids: Set<Long>, destFolder: java.io.File) = fileScannerViewModel.moveSelectedLocalFiles(context, ids, destFolder)
+    fun copySelectedLocalFiles(context: android.content.Context, ids: Set<Long>, destFolder: java.io.File) = fileScannerViewModel.copySelectedLocalFiles(context, ids, destFolder)
 
     // Git simulated tracking states & methods
     private val _trackedRepositories = MutableStateFlow<List<TrackedRepository>>(emptyList())

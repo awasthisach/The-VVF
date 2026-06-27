@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.Flow
+import androidx.paging.cachedIn
 import kotlinx.coroutines.launch
 
 class SafeFolderViewModel(
@@ -33,6 +35,9 @@ class SafeFolderViewModel(
 
     val allSafeFiles: StateFlow<List<FileEntity>> = repository.allSafeFiles
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pagedSafeFiles: Flow<androidx.paging.PagingData<FileEntity>> = repository.getPagedSafeFiles()
+        .cachedIn(viewModelScope)
 
     init {
         viewModelScope.launch {
@@ -65,6 +70,17 @@ class SafeFolderViewModel(
         }
     }
 
+    private fun hashPin(pin: String): String {
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val salt = "VVF_SMART_FILE_MANAGER_SECURE_SALT_2026"
+            val hashBytes = digest.digest((pin + salt).toByteArray(Charsets.UTF_8))
+            hashBytes.joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            pin
+        }
+    }
+
     private suspend fun handleCompletedPinInput() {
         val pin = _inputPinBuffer.value
         _inputPinBuffer.value = "" // Clear buffer instantly
@@ -92,7 +108,7 @@ class SafeFolderViewModel(
             }
             is SafeFolderState.Locked -> {
                 val savedPin = repository.getPIN()
-                if (pin == savedPin) {
+                if (hashPin(pin) == savedPin) {
                     _safeFolderState.value = SafeFolderState.Unlocked
                     _pinErrorMessage.value = null
                     Log.i("SafeFolderViewModel", "Safe Folder Unlocked successfully [StructuredLog: { event: \"safe_unlock_success\" }]")
@@ -112,9 +128,15 @@ class SafeFolderViewModel(
         Log.d("SafeFolderViewModel", "Safe Folder locked [StructuredLog: { event: \"safe_locked\" }]")
     }
 
+    fun unlockWithBiometrics() {
+        _safeFolderState.value = SafeFolderState.Unlocked
+        _pinErrorMessage.value = null
+        Log.i("SafeFolderViewModel", "Safe Folder Unlocked via Biometrics [StructuredLog: { event: \"safe_unlock_biometrics_success\" }]")
+    }
+
     fun moveSelectedToSafe(selectedIds: Set<Long>, onClearSelection: () -> Unit) {
         viewModelScope.launch {
-            repository.moveFilesToSafe(selectedIds)
+            repository.moveFilesToSafe(getApplication(), selectedIds)
             Log.i("SafeFolderViewModel", "Moved files to Safe Folder [StructuredLog: { event: \"files_moved_to_safe\", count: ${selectedIds.size} }]")
             onClearSelection()
         }
@@ -122,7 +144,7 @@ class SafeFolderViewModel(
 
     fun restoreSelectedFromSafe(selectedIds: Set<Long>) {
         viewModelScope.launch {
-            repository.restoreFilesFromSafe(selectedIds)
+            repository.restoreFilesFromSafe(getApplication(), selectedIds)
             Log.i("SafeFolderViewModel", "Restored files from Safe Folder [StructuredLog: { event: \"files_restored\", count: ${selectedIds.size} }]")
         }
     }

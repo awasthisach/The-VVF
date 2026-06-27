@@ -33,7 +33,11 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.io.File
 import com.vvf.smartfilemanager.BuildConfig
+import androidx.paging.cachedIn
+import androidx.paging.PagingData
+import kotlinx.coroutines.flow.Flow
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class FileScannerViewModel(
     application: Application,
     private val repository: IAppRepository
@@ -216,6 +220,9 @@ class FileScannerViewModel(
     val mediaTotalSize: StateFlow<Long> = repository.mediaTotalSize
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
+    private val _sortOrder = MutableStateFlow(SortOrder.NAME_ASC)
+    val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
+
     private val _localSearchQuery = MutableStateFlow("")
     val localSearchQuery: StateFlow<String> = _localSearchQuery.asStateFlow()
 
@@ -227,15 +234,17 @@ class FileScannerViewModel(
     }
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val filteredLocalFiles: StateFlow<List<FileEntity>> = combine(
-        _localSearchQuery, _selectedCategory
-    ) { query, category ->
-        Pair(query, category)
-    }.flatMapLatest { (query, category) ->
-        repository.searchLocalNonSafeFiles(query, category, limit = 1000)
-    }
-    .flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val filteredLocalFiles: Flow<PagingData<FileEntity>> = combine(
+        _localSearchQuery, _selectedCategory, _sortOrder
+    ) { query, category, sort ->
+        Triple(query, category, sort)
+    }.flatMapLatest { (query, category, sort) ->
+        val dbCategory = when (category) {
+            "IMAGES", "VIDEOS", "AUDIO", "DOCUMENTS", "ARCHIVES", "APK", "LARGE", "EMPTY_FOLDERS" -> category
+            else -> "ALL"
+        }
+        repository.getPagedFiles(query, dbCategory, sort)
+    }.cachedIn(viewModelScope)
 
     private val _selectedLocalFileIds = MutableStateFlow<Set<Long>>(emptySet())
     val selectedLocalFileIds: StateFlow<Set<Long>> = _selectedLocalFileIds.asStateFlow()
@@ -258,9 +267,6 @@ class FileScannerViewModel(
 
     private val _isScanningRealFiles = MutableStateFlow(false)
     val isScanningRealFiles: StateFlow<Boolean> = _isScanningRealFiles.asStateFlow()
-
-    private val _sortOrder = MutableStateFlow(SortOrder.NAME_ASC)
-    val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
 
     private val _useSemanticResults = MutableStateFlow(false)
     val useSemanticResults: StateFlow<Boolean> = _useSemanticResults.asStateFlow()
@@ -338,6 +344,10 @@ class FileScannerViewModel(
             SortOrder.SIZE_SMALLEST -> filtered.sortedBy { it.size }
             SortOrder.EXTENSION_ASC -> filtered.sortedWith(compareBy<ScannedFile> { it.name.substringAfterLast('.', "").lowercase() }.thenBy { it.name.lowercase() })
             SortOrder.EXTENSION_DESC -> filtered.sortedWith(compareByDescending<ScannedFile> { it.name.substringAfterLast('.', "").lowercase() }.thenBy { it.name.lowercase() })
+            SortOrder.DATE_CREATED_NEWEST -> filtered.sortedByDescending { it.uri.hashCode() }
+            SortOrder.DATE_CREATED_OLDEST -> filtered.sortedBy { it.uri.hashCode() }
+            SortOrder.FILE_TYPE_ASC -> filtered.sortedBy { it.mimeType.lowercase() }
+            SortOrder.FILE_TYPE_DESC -> filtered.sortedByDescending { it.mimeType.lowercase() }
         }
     }
     .flowOn(Dispatchers.Default)
@@ -885,8 +895,7 @@ class FileScannerViewModel(
                 
                 // Immediately delete matching database entities within a transaction boundary
                 try {
-                    val dbEntities = repository.allLocalNonSafeFiles.firstOrNull() ?: emptyList()
-                    dbEntities.filter { it.path in pathsToDelete }.forEach { entity ->
+                    repository.getFilesByPaths(pathsToDelete.toList()).forEach { entity ->
                         repository.deleteFileById(entity.id)
                     }
                 } catch (dbEx: Exception) {
@@ -934,8 +943,7 @@ class FileScannerViewModel(
                 
                 // Keep DB in absolute sync
                 try {
-                    val dbEntities = repository.allLocalNonSafeFiles.firstOrNull() ?: emptyList()
-                    dbEntities.find { it.path == file.path }?.let { entity ->
+                    repository.getFileByPath(file.path)?.let { entity ->
                         repository.deleteFileById(entity.id)
                     }
                 } catch (dbEx: Exception) {
@@ -972,6 +980,18 @@ class FileScannerViewModel(
         _isMultiSelectMode.value = _selectedLocalFileIds.value.isNotEmpty()
     }
 
+    fun selectAllLocalFiles() {
+        viewModelScope.launch {
+            val dbCategory = when (selectedCategory.value) {
+                "IMAGES", "VIDEOS", "AUDIO", "DOCUMENTS", "ARCHIVES", "APK", "LARGE", "EMPTY_FOLDERS" -> selectedCategory.value
+                else -> "ALL"
+            }
+            val allIds = repository.getFilteredFileIds(localSearchQuery.value, dbCategory)
+            _selectedLocalFileIds.value = allIds.toSet()
+            _isMultiSelectMode.value = allIds.isNotEmpty()
+        }
+    }
+
     fun selectAllLocalFiles(filesList: List<FileEntity>) {
         _selectedLocalFileIds.value = filesList.map { it.id }.toSet()
         _isMultiSelectMode.value = true
@@ -980,6 +1000,19 @@ class FileScannerViewModel(
     fun clearLocalSelection() {
         _selectedLocalFileIds.value = emptySet()
         _isMultiSelectMode.value = false
+    }
+
+    fun inverseLocalSelection() {
+        viewModelScope.launch {
+            val dbCategory = when (selectedCategory.value) {
+                "IMAGES", "VIDEOS", "AUDIO", "DOCUMENTS", "ARCHIVES", "APK", "LARGE", "EMPTY_FOLDERS" -> selectedCategory.value
+                else -> "ALL"
+            }
+            val allIds = repository.getFilteredFileIds(localSearchQuery.value, dbCategory)
+            val current = _selectedLocalFileIds.value
+            _selectedLocalFileIds.value = allIds.filter { !current.contains(it) }.toSet()
+            _isMultiSelectMode.value = _selectedLocalFileIds.value.isNotEmpty()
+        }
     }
 
     fun inverseLocalSelection(filesList: List<FileEntity>) {
@@ -991,8 +1024,7 @@ class FileScannerViewModel(
 
     fun trashSelectedFiles(context: Context, ids: Set<Long>) {
         viewModelScope.launch(Dispatchers.IO) {
-            val files = repository.allLocalNonSafeFiles.first()
-            val selected = files.filter { ids.contains(it.id) }
+            val selected = repository.getFilesByIds(ids.toList())
             selected.forEach { file ->
                 moveToTrash(File(file.path), file.mimeType)
             }
@@ -1002,8 +1034,7 @@ class FileScannerViewModel(
 
     fun shareSelectedFiles(context: Context, ids: Set<Long>) {
         viewModelScope.launch(Dispatchers.IO) {
-            val files = repository.allLocalNonSafeFiles.first()
-            val selected = files.filter { ids.contains(it.id) }
+            val selected = repository.getFilesByIds(ids.toList())
             if (selected.isEmpty()) return@launch
             
             val uris = ArrayList<Uri>()
@@ -1034,8 +1065,7 @@ class FileScannerViewModel(
 
     fun compressSelectedToZip(context: Context, ids: Set<Long>) {
         viewModelScope.launch(Dispatchers.IO) {
-            val files = repository.allLocalNonSafeFiles.first()
-            val selected = files.filter { ids.contains(it.id) }
+            val selected = repository.getFilesByIds(ids.toList())
             if (selected.isEmpty()) return@launch
             
             val firstFile = File(selected.first().path)
@@ -1043,19 +1073,14 @@ class FileScannerViewModel(
             if (!parentDir.exists()) parentDir.mkdirs()
             
             val zipFile = File(parentDir, "archive_${System.currentTimeMillis()}.zip")
+            val filesList = selected.mapNotNull { f ->
+                val file = File(f.path)
+                if (file.exists() && file.isFile) file else null
+            }
+
             try {
-                java.util.zip.ZipOutputStream(java.io.FileOutputStream(zipFile)).use { zos ->
-                    selected.forEach { file ->
-                        val f = File(file.path)
-                        if (f.exists() && f.isFile) {
-                            val entry = java.util.zip.ZipEntry(f.name)
-                            zos.putNextEntry(entry)
-                            f.inputStream().use { input ->
-                                input.copyTo(zos)
-                            }
-                            zos.closeEntry()
-                        }
-                    }
+                com.vvf.smartfilemanager.utils.ArchiveHelper.compressToZip(filesList, zipFile).collect { progress ->
+                    Log.d("FileScannerViewModel", "Zip creation progress: ${(progress * 100).toInt()}%")
                 }
                 
                 val zipEntity = FileEntity(
@@ -1075,9 +1100,272 @@ class FileScannerViewModel(
                 }
             } catch (e: Exception) {
                 Log.e("FileScannerViewModel", "Failed to compress to zip", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "Zip failed: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
+                }
             } finally {
                 clearLocalSelection()
             }
+        }
+    }
+
+    fun decompressArchive(context: Context, fileId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val fileEntity = repository.getFilesByIds(listOf(fileId)).firstOrNull() ?: return@launch
+            val archiveFile = File(fileEntity.path)
+            if (!archiveFile.exists()) return@launch
+
+            val parentDir = archiveFile.parentFile ?: context.getExternalFilesDir(null) ?: return@launch
+            val extName = archiveFile.nameWithoutExtension
+            val extractDestDir = File(parentDir, "${extName}_extracted_${System.currentTimeMillis()}")
+            if (!extractDestDir.exists()) extractDestDir.mkdirs()
+
+            try {
+                val flow = if (archiveFile.name.endsWith(".tar", ignoreCase = true)) {
+                    com.vvf.smartfilemanager.utils.ArchiveHelper.decompressTar(archiveFile, extractDestDir)
+                } else {
+                    com.vvf.smartfilemanager.utils.ArchiveHelper.decompressZip(archiveFile, extractDestDir)
+                }
+
+                flow.collect { progress ->
+                    Log.d("FileScannerViewModel", "Decompression progress: ${(progress * 100).toInt()}%")
+                }
+
+                // Scan and index extracted files back into local database
+                val extractedFiles = mutableListOf<FileEntity>()
+                extractDestDir.walkTopDown().forEach { file ->
+                    if (file.isFile) {
+                        val mime = java.net.URLConnection.guessContentTypeFromName(file.name) ?: "*/*"
+                        extractedFiles.add(
+                            FileEntity(
+                                name = file.name,
+                                path = file.absolutePath,
+                                size = file.length(),
+                                lastModified = file.lastModified(),
+                                mimeType = mime,
+                                isLocal = true,
+                                isSafe = false,
+                                isDuplicate = false,
+                                isJunk = false
+                            )
+                        )
+                    }
+                }
+                if (extractedFiles.isNotEmpty()) {
+                    repository.insertFiles(extractedFiles)
+                }
+
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Extracted ${extractedFiles.size} files to: ${extractDestDir.name}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Failed to extract archive", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Extraction failed: ${e.localizedMessage}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                // Secure cleanup of partial files
+                extractDestDir.deleteRecursively()
+            }
+        }
+    }
+
+    private val _selectedDuplicateUris = MutableStateFlow<Set<String>>(emptySet())
+    val selectedDuplicateUris: StateFlow<Set<String>> = _selectedDuplicateUris.asStateFlow()
+
+    fun toggleDuplicateSelection(uriString: String) {
+        val current = _selectedDuplicateUris.value
+        _selectedDuplicateUris.value = if (current.contains(uriString)) current - uriString else current + uriString
+    }
+
+    fun clearDuplicateSelection() {
+        _selectedDuplicateUris.value = emptySet()
+    }
+
+    fun selectDuplicatesNewest() {
+        val groups = realDuplicates.value
+        val toSelect = mutableSetOf<String>()
+        groups.values.forEach { group ->
+            if (group.size > 1) {
+                val sorted = group.sortedByDescending { it.dateModified }
+                sorted.firstOrNull()?.let { toSelect.add(it.uri.toString()) }
+            }
+        }
+        _selectedDuplicateUris.value = toSelect
+    }
+
+    fun selectDuplicatesOldest() {
+        val groups = realDuplicates.value
+        val toSelect = mutableSetOf<String>()
+        groups.values.forEach { group ->
+            if (group.size > 1) {
+                val sorted = group.sortedBy { it.dateModified }
+                sorted.firstOrNull()?.let { toSelect.add(it.uri.toString()) }
+            }
+        }
+        _selectedDuplicateUris.value = toSelect
+    }
+
+    fun selectDuplicatesLargest() {
+        val groups = realDuplicates.value
+        val toSelect = mutableSetOf<String>()
+        groups.values.forEach { group ->
+            if (group.size > 1) {
+                val sorted = group.sortedByDescending { it.size }
+                sorted.firstOrNull()?.let { toSelect.add(it.uri.toString()) }
+            }
+        }
+        _selectedDuplicateUris.value = toSelect
+    }
+
+    fun bulkDeleteSelectedDuplicates() {
+        val uris = _selectedDuplicateUris.value
+        val groups = realDuplicates.value
+        val context = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            groups.values.flatten().forEach { file ->
+                if (uris.contains(file.uri.toString())) {
+                    deletePhysicalFile(context, file)
+                }
+            }
+            _selectedDuplicateUris.value = emptySet()
+            scanRealFiles()
+        }
+    }
+
+    fun moveSelectedDuplicatesToTrash() {
+        val uris = _selectedDuplicateUris.value
+        val groups = realDuplicates.value
+        viewModelScope.launch(Dispatchers.IO) {
+            groups.values.flatten().forEach { file ->
+                if (uris.contains(file.uri.toString())) {
+                    moveToTrash(File(file.path), file.mimeType)
+                }
+            }
+            _selectedDuplicateUris.value = emptySet()
+            scanRealFiles()
+        }
+    }
+
+    fun moveSelectedDuplicatesToFolder(destFolder: File) {
+        val uris = _selectedDuplicateUris.value
+        val groups = realDuplicates.value
+        viewModelScope.launch(Dispatchers.IO) {
+            groups.values.flatten().forEach { file ->
+                if (uris.contains(file.uri.toString())) {
+                    try {
+                        val srcFile = File(file.path)
+                        if (srcFile.exists()) {
+                            val destFile = File(destFolder, srcFile.name)
+                            if (srcFile.renameTo(destFile) || copyFilePhysical(srcFile, destFile)) {
+                                if (srcFile.exists()) {
+                                    srcFile.delete()
+                                }
+                                val match = repository.getFileByPath(srcFile.absolutePath)
+                                if (match != null) {
+                                    repository.updateFile(match.copy(path = destFile.absolutePath, lastModified = destFile.lastModified()))
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("FileScannerViewModel", "Failed to move duplicate", e)
+                    }
+                }
+            }
+            _selectedDuplicateUris.value = emptySet()
+            scanRealFiles()
+        }
+    }
+
+    fun getMediaRootDir(): File {
+        val context = getApplication<Application>()
+        val mediaDir = File(context.getExternalFilesDir(null)?.absolutePath?.replace("data", "media")?.replace("/files", "") ?: "/sdcard/Android/media/com.vvf.smartfilemanager")
+        if (!mediaDir.exists()) {
+            mediaDir.mkdirs()
+        }
+        return mediaDir
+    }
+
+    fun getAllSubFolders(): List<File> {
+        val root = getMediaRootDir()
+        val folders = mutableListOf<File>()
+        folders.add(root)
+        
+        fun walk(dir: File) {
+            val list = dir.listFiles() ?: return
+            for (f in list) {
+                if (f.isDirectory && !f.name.startsWith(".") && f.name != "Compressed" && f.name != ".trash") {
+                    folders.add(f)
+                    walk(f)
+                }
+            }
+        }
+        walk(root)
+        return folders
+    }
+
+    fun moveSelectedLocalFiles(context: Context, ids: Set<Long>, destFolder: File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val selected = repository.getFilesByIds(ids.toList())
+            selected.forEach { entity ->
+                try {
+                    val srcFile = File(entity.path)
+                    if (srcFile.exists()) {
+                        val destFile = File(destFolder, srcFile.name)
+                        if (srcFile.renameTo(destFile) || copyFilePhysical(srcFile, destFile)) {
+                            if (srcFile.exists()) {
+                                srcFile.delete()
+                            }
+                            val updated = entity.copy(
+                                path = destFile.absolutePath,
+                                lastModified = destFile.lastModified()
+                            )
+                            repository.updateFile(updated)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("FileScannerViewModel", "Failed to move file ${entity.path}", e)
+                }
+            }
+            clearLocalSelection()
+        }
+    }
+
+    fun copySelectedLocalFiles(context: Context, ids: Set<Long>, destFolder: File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val selected = repository.getFilesByIds(ids.toList())
+            selected.forEach { entity ->
+                try {
+                    val srcFile = File(entity.path)
+                    if (srcFile.exists()) {
+                        val destFile = File(destFolder, srcFile.name)
+                        if (copyFilePhysical(srcFile, destFile)) {
+                            val copiedEntity = FileEntity(
+                                name = destFile.name,
+                                path = destFile.absolutePath,
+                                size = destFile.length(),
+                                lastModified = destFile.lastModified(),
+                                mimeType = entity.mimeType,
+                                isLocal = true,
+                                isSafe = false,
+                                isDuplicate = false,
+                                isJunk = false
+                            )
+                            repository.insertFile(copiedEntity)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("FileScannerViewModel", "Failed to copy file ${entity.path}", e)
+                }
+            }
+            clearLocalSelection()
         }
     }
 
@@ -1280,9 +1568,81 @@ class FileScannerViewModel(
         return sdf.format(java.util.Date(timestamp))
     }
 
+    fun createFolder(context: Context, folderName: String, onComplete: (Boolean, String?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val treeUriStr = _safTreeUri.value
+            if (treeUriStr == null) {
+                withContext(Dispatchers.Main) {
+                    onComplete(false, "No storage directory selected (SAF). Please grant access first.")
+                }
+                return@launch
+            }
+
+            try {
+                val treeUri = Uri.parse(treeUriStr)
+                val documentFile = DocumentFile.fromTreeUri(context, treeUri)
+                if (documentFile == null || !documentFile.exists() || !documentFile.canWrite()) {
+                    withContext(Dispatchers.Main) {
+                        onComplete(false, "Permission denied or directory read-only.")
+                    }
+                    return@launch
+                }
+
+                val activeFilter = _selectedFolderFilter.value
+                val targetDirFile = if (activeFilter != null) {
+                    findDocumentFileForPath(documentFile, activeFilter) ?: documentFile
+                } else {
+                    documentFile
+                }
+
+                val existing = targetDirFile.findFile(folderName)
+                if (existing != null && existing.isDirectory) {
+                    withContext(Dispatchers.Main) {
+                        onComplete(false, "A folder with this name already exists.")
+                    }
+                    return@launch
+                }
+
+                val newDir = targetDirFile.createDirectory(folderName)
+                if (newDir != null && newDir.exists()) {
+                    scanSafFiles(context)
+                    withContext(Dispatchers.Main) {
+                        onComplete(true, null)
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        onComplete(false, "Failed to create directory.")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("FileScannerViewModel", "Error creating folder", e)
+                withContext(Dispatchers.Main) {
+                    onComplete(false, "Error: ${e.localizedMessage}")
+                }
+            }
+        }
+    }
+
+    private fun findDocumentFileForPath(parent: DocumentFile, name: String): DocumentFile? {
+        if (parent.name == name) return parent
+        for (file in parent.listFiles()) {
+            if (file.isDirectory) {
+                if (file.name == name) {
+                    return file
+                }
+                val found = findDocumentFileForPath(file, name)
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
     // --- Trash / Recycle Bin Flow & Actions ---
     val allTrashFiles: StateFlow<List<TrashEntity>> = repository.allTrashFiles
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pagedTrashFiles: Flow<PagingData<TrashEntity>> = repository.getPagedTrashFiles()
+        .cachedIn(viewModelScope)
 
     fun updateTrashCleanupDays(days: Int) {
         _trashCleanupDays.value = days
@@ -1337,9 +1697,7 @@ class FileScannerViewModel(
                     repository.insertTrash(trash)
                     
                     // Delete from database list if matches
-                    val dbEntities = repository.allLocalNonSafeFiles.first()
-                    val match = dbEntities.find { it.path == file.absolutePath }
-                    if (match != null) {
+                    repository.getFileByPath(file.absolutePath)?.let { match ->
                         repository.deleteFile(match)
                     }
                 }
@@ -1451,6 +1809,10 @@ enum class SortOrder {
     SIZE_LARGEST,
     SIZE_SMALLEST,
     EXTENSION_ASC,
-    EXTENSION_DESC
+    EXTENSION_DESC,
+    DATE_CREATED_NEWEST,
+    DATE_CREATED_OLDEST,
+    FILE_TYPE_ASC,
+    FILE_TYPE_DESC
 }
 

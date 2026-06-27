@@ -10,6 +10,7 @@ plugins {
 android {
     namespace = "com.vvf.smartfilemanager"
     compileSdk = 36
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "com.vvf.smartfilemanager"
@@ -79,10 +80,12 @@ dependencies {
     implementation(libs.accompanist.permissions)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.paging)
     implementation(libs.androidx.work.runtime)
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.paging.compose)
+    implementation(libs.androidx.biometric)
     implementation(libs.coil.compose)
     implementation(libs.converter.moshi)
     implementation(libs.kotlinx.coroutines.android)

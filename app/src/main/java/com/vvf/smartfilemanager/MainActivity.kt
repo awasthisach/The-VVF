@@ -17,7 +17,9 @@ import com.vvf.smartfilemanager.ui.StoragePermissionGate
 import com.vvf.smartfilemanager.ui.theme.MyApplicationTheme
 import com.vvf.smartfilemanager.viewmodel.SmartViewModel
 
-class MainActivity : ComponentActivity() {
+import androidx.fragment.app.FragmentActivity
+
+class MainActivity : FragmentActivity() {
     private val viewModel: SmartViewModel by viewModels()
 
     private val permissionLauncher = registerForActivityResult(
@@ -31,6 +33,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Prevent screenshots and recent screen previews to protect private files
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        
         enableEdgeToEdge()
 
         // Check and request appropriate permissions

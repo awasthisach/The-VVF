@@ -52,6 +52,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import com.vvf.smartfilemanager.data.GitHubRepoFile
 import com.vvf.smartfilemanager.data.ScannedFile
 import com.vvf.smartfilemanager.viewmodel.*
+import androidx.paging.compose.collectAsLazyPagingItems
 
 @Composable
 fun MainLayout(viewModel: SmartViewModel) {
@@ -112,13 +113,6 @@ fun MainLayout(viewModel: SmartViewModel) {
                 NavigationBarItem(
                     selected = activeTab == 2,
                     onClick = { activeTab = 2 },
-                    icon = { Icon(Icons.Filled.Cloud, contentDescription = "Cloud Sim") },
-                    label = { Text("Cloud Manager") },
-                    modifier = Modifier.testTag("nav_tab_cloud")
-                )
-                NavigationBarItem(
-                    selected = activeTab == 3,
-                    onClick = { activeTab = 3 },
                     icon = { Icon(Icons.Filled.AutoAwesome, contentDescription = "AI Assistant") },
                     label = { Text("AI Assistant") },
                     modifier = Modifier.testTag("nav_tab_ai")
@@ -202,8 +196,7 @@ fun MainLayout(viewModel: SmartViewModel) {
                 when (activeTab) {
                     0 -> CleanScreen(viewModel)
                     1 -> BrowseScreen(viewModel)
-                    2 -> CloudManagerScreen(viewModel)
-                    3 -> AiAssistantScreen(viewModel)
+                    2 -> AiAssistantScreen(viewModel)
                 }
             }
         }
@@ -1213,7 +1206,9 @@ data class DonutCategory(
 fun BrowseScreen(viewModel: SmartViewModel) {
     val context = LocalContext.current
     val safTreeUri by viewModel.safTreeUri.collectAsStateWithLifecycle()
-    val filteredFiles by viewModel.filteredLocalFiles.collectAsStateWithLifecycle()
+    val pagedFiles = viewModel.filteredLocalFiles.collectAsLazyPagingItems()
+    val trashFiles = viewModel.pagedTrashFiles.collectAsLazyPagingItems()
+    val autoPurgeDays by viewModel.trashCleanupDays.collectAsStateWithLifecycle()
     val searchQueries by viewModel.localSearchQuery.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedLocalFileIds.collectAsStateWithLifecycle()
     val isMultiSelect by viewModel.isMultiSelectMode.collectAsStateWithLifecycle()
@@ -1222,6 +1217,9 @@ fun BrowseScreen(viewModel: SmartViewModel) {
     // Real file states
     val realFiles by viewModel.realFiles.collectAsStateWithLifecycle()
     val realDuplicates by viewModel.realDuplicates.collectAsStateWithLifecycle()
+    val selectedDuplicateUris by viewModel.selectedDuplicateUris.collectAsStateWithLifecycle()
+    var showFolderChooserDialog by remember { mutableStateOf(false) }
+    var folderChooserTarget by remember { mutableStateOf<String?>(null) } // "DUPLICATES" or "MY_FILES_MOVE" or "MY_FILES_COPY"
     val isScanningRealFiles by viewModel.isScanningRealFiles.collectAsStateWithLifecycle()
     val realScanProgress by viewModel.realScanProgress.collectAsStateWithLifecycle()
     val realScanStatusMessage by viewModel.realScanStatusMessage.collectAsStateWithLifecycle()
@@ -1243,6 +1241,8 @@ fun BrowseScreen(viewModel: SmartViewModel) {
 
     var renameFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
     var renameFileNameInput by remember { mutableStateOf("") }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var createFolderNameInput by remember { mutableStateOf("") }
     var copyFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
     var moveFileTarget by remember { mutableStateOf<ScannedFile?>(null) }
 
@@ -1486,6 +1486,82 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                     showHeaderSortMenu = false
                                 }
                             )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Created: Newest First", 
+                                            fontWeight = if (currentSortOrder == SortOrder.DATE_CREATED_NEWEST) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.DATE_CREATED_NEWEST) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (currentSortOrder == SortOrder.DATE_CREATED_NEWEST) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.DATE_CREATED_NEWEST)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Created: Oldest First", 
+                                            fontWeight = if (currentSortOrder == SortOrder.DATE_CREATED_OLDEST) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.DATE_CREATED_OLDEST) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (currentSortOrder == SortOrder.DATE_CREATED_OLDEST) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.DATE_CREATED_OLDEST)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "File Type: A-Z", 
+                                            fontWeight = if (currentSortOrder == SortOrder.FILE_TYPE_ASC) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.FILE_TYPE_ASC) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (currentSortOrder == SortOrder.FILE_TYPE_ASC) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.FILE_TYPE_ASC)
+                                    showHeaderSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "File Type: Z-A", 
+                                            fontWeight = if (currentSortOrder == SortOrder.FILE_TYPE_DESC) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (currentSortOrder == SortOrder.FILE_TYPE_DESC) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (currentSortOrder == SortOrder.FILE_TYPE_DESC) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.updateSortOrder(SortOrder.FILE_TYPE_DESC)
+                                    showHeaderSortMenu = false
+                                }
+                            )
                         }
                     }
 
@@ -1517,11 +1593,6 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                 Tab(
                     selected = browseSubTab == 2,
                     onClick = { browseSubTab = 2 },
-                    text = { Text("Simulated Files") }
-                )
-                Tab(
-                    selected = browseSubTab == 3,
-                    onClick = { browseSubTab = 3 },
                     text = { Text("Recycle Bin") }
                 )
             }
@@ -1687,6 +1758,10 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                                     SortOrder.NAME_DESC -> "Name Z-A"
                                                     SortOrder.DATE_NEWEST -> "Newest"
                                                     SortOrder.DATE_OLDEST -> "Oldest"
+                                                    SortOrder.DATE_CREATED_NEWEST -> "Created Newest"
+                                                    SortOrder.DATE_CREATED_OLDEST -> "Created Oldest"
+                                                    SortOrder.FILE_TYPE_ASC -> "Type A-Z"
+                                                    SortOrder.FILE_TYPE_DESC -> "Type Z-A"
                                                     else -> ""
                                                 }
                                                 if (label.isNotEmpty()) {
@@ -2562,20 +2637,127 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
                                     onClick = { viewModel.scanRealFiles() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
                                     Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Find")
+                                    Text("Rescan")
                                 }
-                                if (realDuplicates.isNotEmpty()) {
-                                    Button(
-                                        onClick = { viewModel.deleteRealDuplicates(keepFirst = true) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                if (selectedDuplicateUris.isNotEmpty()) {
+                                    TextButton(
+                                        onClick = { viewModel.clearDuplicateSelection() }
                                     ) {
-                                        Icon(Icons.Filled.Delete, null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Delete All (Keep Newest)")
+                                        Text("Clear")
+                                    }
+                                }
+                            }
+                        }
+
+                        if (realDuplicates.isNotEmpty()) {
+                            // Automated selection tools
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f))
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = "Automated Selection Tools",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { viewModel.selectDuplicatesNewest() },
+                                            modifier = Modifier.weight(1f),
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                                        ) {
+                                            Text("Select Newest", fontSize = 11.sp)
+                                        }
+                                        Button(
+                                            onClick = { viewModel.selectDuplicatesOldest() },
+                                            modifier = Modifier.weight(1f),
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                                        ) {
+                                            Text("Select Oldest", fontSize = 11.sp)
+                                        }
+                                        Button(
+                                            onClick = { viewModel.selectDuplicatesLargest() },
+                                            modifier = Modifier.weight(1f),
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                                        ) {
+                                            Text("Select Largest", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Batch action bar when duplicates are selected
+                            if (selectedDuplicateUris.isNotEmpty()) {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "${selectedDuplicateUris.size} copies selected",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            IconButton(
+                                                onClick = { viewModel.moveSelectedDuplicatesToTrash() }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.DeleteOutline,
+                                                    contentDescription = "Move to Trash",
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    folderChooserTarget = "DUPLICATES"
+                                                    showFolderChooserDialog = true
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.DriveFileMove,
+                                                    contentDescription = "Move to Folder",
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { viewModel.bulkDeleteSelectedDuplicates() }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.DeleteForever,
+                                                    contentDescription = "Bulk Delete",
+                                                    tint = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2650,17 +2832,29 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                     }
 
                                     items(group) { file ->
+                                        val isSelected = selectedDuplicateUris.contains(file.uri.toString())
                                         Card(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 24.dp, vertical = 2.dp),
-                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                                .padding(horizontal = 24.dp, vertical = 2.dp)
+                                                .clickable { viewModel.toggleDuplicateSelection(file.uri.toString()) },
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface
+                                            ),
+                                            border = BorderStroke(
+                                                0.5.dp, 
+                                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                            )
                                         ) {
                                             Row(
                                                 modifier = Modifier.padding(10.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
+                                                Checkbox(
+                                                    checked = isSelected,
+                                                    onCheckedChange = { viewModel.toggleDuplicateSelection(file.uri.toString()) }
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
                                                 Icon(
                                                     imageVector = Icons.Filled.Description,
                                                     contentDescription = null,
@@ -2668,7 +2862,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                                     modifier = Modifier.size(20.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(10.dp))
-                                                Column {
+                                                Column(modifier = Modifier.weight(1f)) {
                                                     Text(
                                                         text = file.path,
                                                         style = MaterialTheme.typography.bodySmall,
@@ -2677,12 +2871,20 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                                         maxLines = 2,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
-                                                    Text(
-                                                        text = "Size: ${viewModel.formatSize(file.size)}",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        fontSize = 10.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                                    )
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                        Text(
+                                                            text = "Size: ${viewModel.formatSize(file.size)}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                                        )
+                                                        Text(
+                                                            text = "Modified: ${viewModel.formatDate(file.dateModified)}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -2693,6 +2895,9 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                     }
                 }
                 2 -> {
+                    // Recycle Bin handled outside
+                }
+                99 -> {
                     // ORIGINAL SIMULATED FILES
                     Column(modifier = Modifier.fillMaxSize()) {
                         Box(
@@ -2817,7 +3022,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                                     )
                                     Text(
-                                        text = "${filteredFiles.size} items",
+                                        text = "${pagedFiles.itemCount} items",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.primary
@@ -2825,7 +3030,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                 }
                             }
 
-                            if (filteredFiles.isEmpty()) {
+                            if (pagedFiles.itemCount == 0) {
                                 item {
                                     Box(
                                         modifier = Modifier
@@ -2846,17 +3051,23 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                     }
                                 }
                             } else {
-                                items(filteredFiles, key = { it.id }) { file ->
-                                    val isSelected = selectedIds.contains(file.id)
-                                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                                        LocalFileItemCard(
-                                            file = file,
-                                            isSelected = isSelected,
-                                            onOpenFile = { viewModel.openFileInViewer(file) },
-                                            onToggleSelect = { viewModel.toggleLocalFileSelection(file.id) },
-                                            formatSize = { viewModel.formatSize(it) },
-                                            formatDate = { viewModel.formatDate(it) }
-                                        )
+                                items(
+                                    count = pagedFiles.itemCount,
+                                    key = { index -> pagedFiles[index]?.id ?: index.toLong() }
+                                ) { index ->
+                                    val file = pagedFiles[index]
+                                    if (file != null) {
+                                        val isSelected = selectedIds.contains(file.id)
+                                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                            LocalFileItemCard(
+                                                file = file,
+                                                isSelected = isSelected,
+                                                onOpenFile = { viewModel.openFileInViewer(file) },
+                                                onToggleSelect = { viewModel.toggleLocalFileSelection(file.id) },
+                                                formatSize = { viewModel.formatSize(it) },
+                                                formatDate = { viewModel.formatDate(it) }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -2867,7 +3078,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
         }
 
         AnimatedVisibility(
-            visible = isMultiSelect && (browseSubTab == 0 || browseSubTab == 2),
+            visible = isMultiSelect && browseSubTab == 0,
             enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(250)) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(250)) + fadeOut(),
             modifier = Modifier
@@ -2901,10 +3112,10 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                         )
 
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TextButton(onClick = { viewModel.selectAllLocalFiles(filteredFiles) }) {
+                            TextButton(onClick = { viewModel.selectAllLocalFiles() }) {
                                 Text("Select All", style = MaterialTheme.typography.labelMedium)
                             }
-                            TextButton(onClick = { viewModel.fileScannerViewModel.inverseLocalSelection(filteredFiles) }) {
+                            TextButton(onClick = { viewModel.fileScannerViewModel.inverseLocalSelection() }) {
                                 Text("Inverse", style = MaterialTheme.typography.labelMedium)
                             }
                         }
@@ -2955,6 +3166,47 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                 .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f))
                         ) {
                             Icon(Icons.Filled.Inventory, "Compress to ZIP", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+
+                        // Extract single zip/tar action
+                        if (selectedIds.size == 1) {
+                            IconButton(
+                                onClick = {
+                                    viewModel.fileScannerViewModel.decompressArchive(context, selectedIds.first())
+                                    viewModel.fileScannerViewModel.clearLocalSelection()
+                                },
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f))
+                            ) {
+                                Icon(Icons.Filled.Unarchive, "Extract Archive", tint = MaterialTheme.colorScheme.secondary)
+                            }
+                        }
+
+                        // Bulk Move to chosen folder
+                        IconButton(
+                            onClick = {
+                                folderChooserTarget = "MY_FILES_MOVE"
+                                showFolderChooserDialog = true
+                            },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                        ) {
+                            Icon(Icons.Filled.DriveFileMove, "Move Selected Files", tint = MaterialTheme.colorScheme.primary)
+                        }
+
+                        // Bulk Copy to chosen folder
+                        IconButton(
+                            onClick = {
+                                folderChooserTarget = "MY_FILES_COPY"
+                                showFolderChooserDialog = true
+                            },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f))
+                        ) {
+                            Icon(Icons.Filled.ContentCopy, "Copy Selected Files", tint = MaterialTheme.colorScheme.secondary)
                         }
 
                         // Delete Forever action
@@ -3096,8 +3348,8 @@ fun BrowseScreen(viewModel: SmartViewModel) {
             }
         }
 
-                /*
-                    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        if (browseSubTab == 2) {
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                             colors = CardDefaults.cardColors(
@@ -3139,11 +3391,11 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Trash Items (${trashFiles.size})",
+                                text = "Trash Items (${trashFiles.itemCount})",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            if (trashFiles.isNotEmpty()) {
+                            if (trashFiles.itemCount > 0) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TextButton(onClick = { viewModel.restoreAllTrash() }) {
                                         Icon(Icons.Filled.RestorePage, "Restore All", modifier = Modifier.size(16.dp))
@@ -3162,7 +3414,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                             }
                         }
 
-                        if (trashFiles.isEmpty()) {
+                        if (trashFiles.itemCount == 0) {
                             Box(
                                 modifier = Modifier.fillMaxSize().weight(1f),
                                 contentAlignment = Alignment.Center
@@ -3183,7 +3435,8 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(trashFiles) { trash ->
+                                items(trashFiles.itemCount) { index ->
+                                    val trash = trashFiles[index] ?: return@items
                                     Card(
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -3244,10 +3497,28 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                             }
                         }
                     }
-                }*/
+                }
+
+        // Floating Action Button to Create New Folder under My Files
+        if (browseSubTab == 0) {
+            FloatingActionButton(
+                onClick = { showCreateFolderDialog = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 24.dp, end = 24.dp)
+                    .testTag("create_folder_fab"),
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.CreateNewFolder,
+                    contentDescription = "Create Folder"
+                )
+            }
+        }
 
         // Floating Action Button to Import Simulated Files directly
-        if (browseSubTab == 2) {
+        if (false) {
             FloatingActionButton(
                 onClick = { showFabMenu = !showFabMenu },
                 modifier = Modifier
@@ -3288,6 +3559,166 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                 },
                 dismissButton = {
                     TextButton(onClick = { realFileToDelete = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // New Folder Dialog
+        if (showCreateFolderDialog) {
+            AlertDialog(
+                onDismissRequest = { 
+                    showCreateFolderDialog = false
+                    createFolderNameInput = ""
+                },
+                title = { Text("Create New Folder") },
+                text = {
+                    Column {
+                        Text("Enter a name for the new folder:")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = createFolderNameInput,
+                            onValueChange = { createFolderNameInput = it },
+                            singleLine = true,
+                            placeholder = { Text("Folder Name") },
+                            modifier = Modifier.fillMaxWidth().testTag("folder_name_input")
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val name = createFolderNameInput.trim()
+                            if (name.isEmpty()) {
+                                Toast.makeText(context, "Folder name cannot be empty", Toast.LENGTH_SHORT).show()
+                                return@TextButton
+                            }
+                            viewModel.createFolder(context, name) { success, errorMsg ->
+                                if (success) {
+                                    Toast.makeText(context, "Folder created successfully!", Toast.LENGTH_SHORT).show()
+                                    showCreateFolderDialog = false
+                                    createFolderNameInput = ""
+                                } else {
+                                    Toast.makeText(context, errorMsg ?: "Failed to create folder", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.testTag("confirm_create_folder")
+                    ) {
+                        Text("Create")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            showCreateFolderDialog = false
+                            createFolderNameInput = ""
+                        }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Folder Chooser Dialog for Move/Copy bulk actions
+        if (showFolderChooserDialog) {
+            val folders = viewModel.getAllSubFolders()
+            var selectedFolder by remember { mutableStateOf<java.io.File?>(null) }
+
+            AlertDialog(
+                onDismissRequest = {
+                    showFolderChooserDialog = false
+                    folderChooserTarget = null
+                },
+                title = { Text("Select Destination Folder") },
+                text = {
+                    Column(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+                        Text("Choose where to move/copy the files:", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (folders.isEmpty()) {
+                            Text("No folders found.", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                items(folders) { folder ->
+                                    val isFolderSelected = selectedFolder?.absolutePath == folder.absolutePath
+                                    val folderName = if (folder.absolutePath == viewModel.getMediaRootDir().absolutePath) "Internal Storage Root" else folder.name
+                                    val folderRelativePath = folder.absolutePath.substringAfter("com.vvf.smartfilemanager")
+                                    
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { selectedFolder = folder }
+                                            .background(
+                                                if (isFolderSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Folder,
+                                            contentDescription = null,
+                                            tint = if (isFolderSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                text = folderName,
+                                                fontWeight = if (isFolderSelected) FontWeight.Bold else FontWeight.Normal,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            if (folderRelativePath.isNotEmpty()) {
+                                                Text(
+                                                    text = folderRelativePath,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = selectedFolder != null,
+                        onClick = {
+                            val dest = selectedFolder ?: return@TextButton
+                            when (folderChooserTarget) {
+                                "DUPLICATES" -> {
+                                    viewModel.moveSelectedDuplicatesToFolder(dest)
+                                    Toast.makeText(context, "Selected duplicates moved to folder!", Toast.LENGTH_SHORT).show()
+                                }
+                                "MY_FILES_MOVE" -> {
+                                    viewModel.moveSelectedLocalFiles(context, selectedIds, dest)
+                                    Toast.makeText(context, "Selected files moved to folder!", Toast.LENGTH_SHORT).show()
+                                }
+                                "MY_FILES_COPY" -> {
+                                    viewModel.copySelectedLocalFiles(context, selectedIds, dest)
+                                    Toast.makeText(context, "Selected files copied to folder!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            showFolderChooserDialog = false
+                            folderChooserTarget = null
+                        }
+                    ) {
+                        Text("Select")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            showFolderChooserDialog = false
+                            folderChooserTarget = null
+                        }
+                    ) {
                         Text("Cancel")
                     }
                 }
@@ -3664,6 +4095,23 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                     onClear = { viewModel.clearLastPinDigit() }
                                 )
 
+                                val activity = context as? androidx.fragment.app.FragmentActivity
+                                if (activity != null) {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Button(
+                                        onClick = {
+                                            com.vvf.smartfilemanager.security.BiometricHelper.showBiometricPrompt(activity) {
+                                                viewModel.unlockWithBiometrics()
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Fingerprint, contentDescription = "Biometric Unlock")
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Unlock with Biometrics")
+                                    }
+                                }
+
                                 Spacer(modifier = Modifier.height(16.dp))
                                 TextButton(onClick = { showSafeFolderDialog = false }) {
                                     Text("Dismiss")
@@ -3671,7 +4119,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                             }
                         }
                         is SafeFolderState.Unlocked -> {
-                            val safeFiles by viewModel.allSafeFiles.collectAsStateWithLifecycle()
+                            val safeFiles = viewModel.pagedSafeFiles.collectAsLazyPagingItems()
                             var selectedSafeIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
                             Column(
@@ -3703,7 +4151,7 @@ fun BrowseScreen(viewModel: SmartViewModel) {
 
                                 Spacer(modifier = Modifier.height(12.dp))
 
-                                if (safeFiles.isEmpty()) {
+                                if (safeFiles.itemCount == 0) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -3723,7 +4171,8 @@ fun BrowseScreen(viewModel: SmartViewModel) {
                                             .heightIn(max = 240.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        items(safeFiles, key = { "safe_${it.id}" }) { file ->
+                                        items(safeFiles.itemCount) { index ->
+                                            val file = safeFiles[index] ?: return@items
                                             val isSafeSelected = selectedSafeIds.contains(file.id)
                                             Row(
                                                 modifier = Modifier
@@ -3807,7 +4256,11 @@ fun HorizontalCategoryGrid(
         Triple("IMAGES", "Images", Icons.Filled.Image to Color(0xFF3B82F6)),
         Triple("VIDEOS", "Videos", Icons.Filled.VideoFile to Color(0xFF10B981)),
         Triple("AUDIO", "Audio", Icons.Filled.AudioFile to Color(0xFFF59E0B)),
-        Triple("DOCUMENTS", "Documents", Icons.Filled.Description to Color(0xFF8B5CF6))
+        Triple("DOCUMENTS", "Documents", Icons.Filled.Description to Color(0xFF8B5CF6)),
+        Triple("ARCHIVES", "Archives", Icons.Filled.Inventory to Color(0xFFE11D48)),
+        Triple("APK", "APK Files", Icons.Filled.Android to Color(0xFF15803D)),
+        Triple("LARGE", "Large Files", Icons.Filled.Storage to Color(0xFF0369A1)),
+        Triple("EMPTY_FOLDERS", "Empty Folders", Icons.Filled.FolderOpen to Color(0xFF4F46E5))
     )
 
     Row(
@@ -6333,6 +6786,7 @@ fun GitHubTrackerScreen(viewModel: SmartViewModel) {
 }
 
 @Composable
+@Suppress("ConfigurationScreenWidthHeight")
 fun GitCodeWorkspace(viewModel: SmartViewModel) {
     val repositoryFiles by viewModel.repositoryFiles.collectAsStateWithLifecycle()
     val selectedRepoFile by viewModel.selectedRepoFile.collectAsStateWithLifecycle()
@@ -8003,100 +8457,202 @@ fun StorageCleanerPanel(
                             }
                         }
 
-                        // Scrolling List of selected tab
-                        val displayFiles = if (activeSubTab == 0) duplicateFiles else largeTempFiles
-
-                        if (displayFiles.isEmpty()) {
-                            Box(
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(Icons.Filled.CheckCircleOutline, "Clean", tint = Color(0xFF22C55E), modifier = Modifier.size(56.dp))
-                                    Text("Excellent! No items found in this section.", fontWeight = FontWeight.Bold)
+                        if (activeSubTab == 0) {
+                            val duplicateFilesPaging = viewModel.pagedScannedDuplicates.collectAsLazyPagingItems()
+                            if (duplicateFilesPaging.itemCount == 0) {
+                                Box(
+                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Icon(Icons.Filled.CheckCircleOutline, "Clean", tint = Color(0xFF22C55E), modifier = Modifier.size(56.dp))
+                                        Text("Excellent! No items found in this section.", fontWeight = FontWeight.Bold)
+                                    }
                                 }
-                            }
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                // Select All header helper row
-                                item {
-                                    val isAllSelected = displayFiles.all { selectedIds.contains(it.id) }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("Select the files to delete:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        TextButton(
-                                            onClick = {
-                                                if (isAllSelected) viewModel.selectNoStorageFiles()
-                                                else viewModel.selectAllStorageFiles(displayFiles.map { it.id })
-                                            }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    item {
+                                        val isAllSelected = (0 until duplicateFilesPaging.itemCount).all { idx ->
+                                            val file = duplicateFilesPaging[idx]
+                                            file != null && selectedIds.contains(file.id)
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(if (isAllSelected) "Deselect All" else "Select All", fontWeight = FontWeight.Bold)
+                                            Text("Select the files to delete:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            TextButton(
+                                                onClick = {
+                                                    if (isAllSelected) {
+                                                        viewModel.selectNoStorageFiles()
+                                                    } else {
+                                                        val ids = (0 until duplicateFilesPaging.itemCount).mapNotNull { idx -> duplicateFilesPaging[idx]?.id }
+                                                        viewModel.selectAllStorageFiles(ids)
+                                                    }
+                                                }
+                                            ) {
+                                                Text(if (isAllSelected) "Deselect All" else "Select All", fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+
+                                    items(duplicateFilesPaging.itemCount) { index ->
+                                        val file = duplicateFilesPaging[index] ?: return@items
+                                        val isSelected = selectedIds.contains(file.id)
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { viewModel.toggleStorageSelectedFile(file.id) }
+                                                .testTag("storage_clean_item_${file.id}"),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                                                                 else MaterialTheme.colorScheme.surface
+                                            ),
+                                            border = BorderStroke(
+                                                width = if (isSelected) 1.5.dp else 1.dp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Checkbox(
+                                                    checked = isSelected,
+                                                    onCheckedChange = { viewModel.toggleStorageSelectedFile(file.id) },
+                                                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(file.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(file.path, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(viewModel.formatSize(file.size), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                                        Text("•", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
+                                                        Text(
+                                                            text = if (file.isDuplicate) "Clone Copy" else if (file.isJunk) "Temp Cache" else "Large File",
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.secondary
+                                                        )
+                                                        val ext = file.name.substringAfterLast('.', "").uppercase()
+                                                        if (ext.isNotEmpty()) {
+                                                            Text("•", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
+                                                            Text(ext, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                IconButton(
+                                                    onClick = { viewModel.openFileInViewer(file) }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Visibility,
+                                                        contentDescription = "View File",
+                                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
-
-                                items(displayFiles, key = { it.id }) { file ->
-                                    val isSelected = selectedIds.contains(file.id)
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { viewModel.toggleStorageSelectedFile(file.id) }
-                                            .testTag("storage_clean_item_${file.id}"),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-                                                             else MaterialTheme.colorScheme.surface
-                                        ),
-                                        border = BorderStroke(
-                                            width = if (isSelected) 1.5.dp else 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                        )
-                                    ) {
+                            }
+                        } else {
+                            if (largeTempFiles.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Icon(Icons.Filled.CheckCircleOutline, "Clean", tint = Color(0xFF22C55E), modifier = Modifier.size(56.dp))
+                                        Text("Excellent! No items found in this section.", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    item {
+                                        val isAllSelected = largeTempFiles.all { selectedIds.contains(it.id) }
                                         Row(
-                                            modifier = Modifier.padding(12.dp),
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Checkbox(
-                                                checked = isSelected,
-                                                onCheckedChange = { viewModel.toggleStorageSelectedFile(file.id) },
-                                                colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                            Text("Select the files to delete:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            TextButton(
+                                                onClick = {
+                                                    if (isAllSelected) viewModel.selectNoStorageFiles()
+                                                    else viewModel.selectAllStorageFiles(largeTempFiles.map { it.id })
+                                                }
+                                            ) {
+                                                Text(if (isAllSelected) "Deselect All" else "Select All", fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+
+                                    items(largeTempFiles, key = { it.id }) { file ->
+                                        val isSelected = selectedIds.contains(file.id)
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { viewModel.toggleStorageSelectedFile(file.id) }
+                                                .testTag("storage_clean_item_${file.id}"),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                                                                 else MaterialTheme.colorScheme.surface
+                                            ),
+                                            border = BorderStroke(
+                                                width = if (isSelected) 1.5.dp else 1.dp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                                             )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(file.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text(file.path, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                    Text(viewModel.formatSize(file.size), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                                                    Text("•", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
-                                                    Text(
-                                                        text = if (file.isDuplicate) "Clone Copy" else if (file.isJunk) "Temp Cache" else "Large File",
-                                                        fontSize = 10.sp,
-                                                        color = MaterialTheme.colorScheme.secondary
-                                                    )
-                                                    // Display file extension / format nicely
-                                                    val ext = file.name.substringAfterLast('.', "").uppercase()
-                                                    if (ext.isNotEmpty()) {
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Checkbox(
+                                                    checked = isSelected,
+                                                    onCheckedChange = { viewModel.toggleStorageSelectedFile(file.id) },
+                                                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(file.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(file.path, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(viewModel.formatSize(file.size), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                                                         Text("•", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
-                                                        Text(ext, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                                        Text(
+                                                            text = if (file.isDuplicate) "Clone Copy" else if (file.isJunk) "Temp Cache" else "Large File",
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.secondary
+                                                        )
+                                                        val ext = file.name.substringAfterLast('.', "").uppercase()
+                                                        if (ext.isNotEmpty()) {
+                                                            Text("•", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
+                                                            Text(ext, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                                        }
                                                     }
                                                 }
-                                            }
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            IconButton(
-                                                onClick = { viewModel.openFileInViewer(file) }
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Visibility,
-                                                    contentDescription = "View File",
-                                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                IconButton(
+                                                    onClick = { viewModel.openFileInViewer(file) }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Visibility,
+                                                        contentDescription = "View File",
+                                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                                    )
+                                                }
                                             }
                                         }
                                     }

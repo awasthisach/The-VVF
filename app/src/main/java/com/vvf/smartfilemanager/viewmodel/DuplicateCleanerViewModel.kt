@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.Flow
+import androidx.paging.cachedIn
 import kotlinx.coroutines.launch
 
 import androidx.work.OneTimeWorkRequestBuilder
@@ -48,6 +50,9 @@ class DuplicateCleanerViewModel(
     val scannedDuplicates: StateFlow<List<FileEntity>> = repository.getScannedDuplicates(limit = 1000)
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pagedScannedDuplicates: Flow<androidx.paging.PagingData<FileEntity>> = repository.getPagedScannedDuplicates()
+        .cachedIn(viewModelScope)
 
     val scannedLargeTempFiles: StateFlow<List<FileEntity>> = repository.getLargeTempFiles(limit = 1000)
         .flowOn(Dispatchers.Default)
