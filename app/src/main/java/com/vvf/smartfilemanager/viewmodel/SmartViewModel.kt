@@ -35,6 +35,7 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         Log.e("VVF_STARTUP", "SmartViewModel constructor STARTED")
+        EmbeddingCache.init(application)
     }
 
     private val db = AppDatabase.getDatabase(application)
