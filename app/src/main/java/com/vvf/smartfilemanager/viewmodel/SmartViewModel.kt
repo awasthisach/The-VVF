@@ -8,6 +8,9 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vvf.smartfilemanager.data.*
+import com.vvf.smartfilemanager.domain.*
+import com.vvf.smartfilemanager.ai.*
+import com.vvf.smartfilemanager.cloud.*
 import com.vvf.smartfilemanager.BuildConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -36,6 +39,17 @@ class SmartViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
     private val repository = AppRepository(db)
+
+    // Clean Architecture System Initializations
+    val cloudSyncManager = CloudSyncManager(application, repository)
+    val geminiAIEngine = GeminiAIEngine(repository)
+    val semanticSearchEngine = SemanticSearchEngine(repository, geminiAIEngine)
+    val fileClassifier = FileClassifier(repository)
+
+    val scanFilesUseCase = ScanFilesUseCase(repository)
+    val searchFilesUseCase = SearchFilesUseCase(repository)
+    val deleteFilesUseCase = DeleteFilesUseCase(repository)
+    val syncMetadataUseCase = SyncMetadataUseCase(cloudSyncManager)
 
     // Sub-viewmodels
     val themeViewModel = ThemeViewModel(application)

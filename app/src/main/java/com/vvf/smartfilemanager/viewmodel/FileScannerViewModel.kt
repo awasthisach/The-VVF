@@ -16,6 +16,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.vvf.smartfilemanager.data.*
+import com.vvf.smartfilemanager.domain.ScanFilesUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -44,6 +45,7 @@ class FileScannerViewModel(
 ) : AndroidViewModel(application) {
 
     private val workManager = WorkManager.getInstance(application)
+    private val scanFilesUseCase = ScanFilesUseCase(repository)
 
     // SAF Tree Uri state and reboot persistence
     private val _safTreeUri = MutableStateFlow<String?>(null)
@@ -611,7 +613,7 @@ class FileScannerViewModel(
             _realScanStatusMessage.value = "Reading directories and mime tables..."
             _realScanProgress.value = 0.5f
             delay(200)
-            repository.scanAndSaveRealFiles(appContext)
+            scanFilesUseCase(appContext)
             try {
                 val scanned = withContext(Dispatchers.IO) {
                     MediaStoreScanner(appContext).scanAllFiles()
